@@ -6,18 +6,26 @@ Returns a predefined response. Replace logic and configuration as needed.
 from __future__ import annotations
 from typing import Any, Dict, Literal, Annotated
 from langgraph.graph import StateGraph, MessagesState, START, END
+from langchain.tools import tool, ToolRuntime
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
-from langchain_core.messages import AIMessage
+from langchain.messages import ToolMessage
 from pydantic import BaseModel, Field
-from langgraph.types import Send
+from langgraph.types import Send, Command
 import operator
 import os
 
+# Send(): Jump/Delegate
+# Directly transitions execution to the target node and continues along 
+# the new graph path. Does not return to the caller node.
+
+# Command(): Invoke & Return
+# Calls a specific node like a subroutine and returns back to the caller 
+# once finished. The invoked node can directly alter/update the State. the caller then read the altered State
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 search_tool = DuckDuckGoSearchRun()
@@ -62,6 +70,22 @@ class ClassificationResult(BaseModel):
         description="List of agents to invoke with their targeted sub-questions"
     )
 
+# Agent wrap tool
+@tool
+def handoff_to_researcher_agent(task: str, runtime: ToolRuntime) -> Command:
+    """Delegate internet research and reference tasks to the researcher agent.
+    Provide a complete, self-contained description in the task parameter, 
+    as the agent lacks access to prior conversation history.
+    """
+    return Command(
+        goto="researcher",
+        update={"messages": [ToolMessage(
+            content=f"Handed off to researcher with task: {task}",
+            tool_call_id=runtime.tool_call_id,
+        )]},
+        graph=Command.PARENT,
+    )
+
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -78,7 +102,7 @@ async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> D
 
     agent = create_agent(
         model=model,
-        tools=[],
+        tools=[handoff_to_researcher_agent],
         system_prompt=soul,
     )
     result = await agent.ainvoke({"messages": state["messages"]})
@@ -167,18 +191,18 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
 builder = StateGraph(RouterState, context_schema=Context)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
-builder.add_node("coder", coder_agent)
-builder.add_node("classifier", classify_query)
-builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
+# builder.add_node("coder", coder_agent)
+# builder.add_node("classifier", classify_query)
+# builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
 
 
 # Start with orchestrator
 builder.add_edge(START, "orchestrator")
-builder.add_edge("orchestrator", "classifier")
+builder.add_edge("orchestrator", END)
 
 # After specialist agents complete, go to END
-builder.add_edge("researcher", END)
-builder.add_edge("coder", END)
+# builder.add_edge("researcher", END)
+# builder.add_edge("coder", END)
 
 # LangGraph API provides persistence automatically
 # - langgraph dev: in-memory checkpointer
