@@ -11,6 +11,8 @@ from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
+from langchain_community.utilities.jira import JiraAPIWrapper
 from deepagents.backends import StateBackend
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
@@ -30,6 +32,8 @@ import os
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 search_tool = DuckDuckGoSearchRun()
+jira_api = JiraAPIWrapper()
+jira_toolkit = JiraToolkit.from_jira_api_wrapper(jira_api)
 model_agent = ModelAgent()
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -102,6 +106,21 @@ def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
         graph=Command.PARENT,
     )
 
+@tool
+def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
+    """Delegate jira management tasks to the jira agent.
+    Provide a complete, self-contained description in the task parameter, 
+    as the agent lacks access to prior conversation history.
+    """
+    return Command(
+        goto="jira",
+        update={"messages": [ToolMessage(
+            content=f"Handed off to jira with task: {task}",
+            tool_call_id=runtime.tool_call_id,
+        )]},
+        graph=Command.PARENT,
+    )
+
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -118,7 +137,11 @@ async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> D
 
     agent = create_agent(
         model=model,
-        tools=[handoff_to_researcher_agent, handoff_to_coder_agent],
+        tools=[
+            handoff_to_researcher_agent, 
+            handoff_to_coder_agent,
+            handoff_to_jira_agent
+            ],
         system_prompt=soul,
     )
     result = await agent.ainvoke({"messages": state["messages"]})
@@ -203,12 +226,37 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
         "results": [{"source": "coder", "result": str(result["messages"][-1].content)}]
     }
 
+async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    file_path = os.path.join(base_dir, "souls", "jira", "SOUL.md")
+    soul = await read_md_file(file_path)
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("jira_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+    tools = jira_toolkit.get_tools()
+
+    agent = create_deep_agent(
+        model=model,
+        tools=tools,
+        system_prompt=soul,
+        backend=StateBackend()
+    )
+
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": state["messages"]})
+
+    # Return results with source tracking
+    return {
+        "messages": result["messages"],
+        "results": [{"source": "coder", "result": str(result["messages"][-1].content)}]
+    }
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("coder", coder_agent)
+builder.add_node("jira", jira_agent)
 # builder.add_node("classifier", classify_query)
 # builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
 

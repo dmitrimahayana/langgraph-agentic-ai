@@ -8,13 +8,21 @@ pytestmark = pytest.mark.anyio
 class TestClearQueryFlows:
     """Test complete flows for clear, unambiguous queries."""
 
-    async def test_clear_coder_flow(self, graph):
-        """
-        Clear research query: orchestrator → classifier → researcher.
+    async def test_clear_jira_flow(self, graph):
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "is there any unsolved ticket on aws phokus project? if so make summarize please"}
+                ]
+            },
+            config={"configurable": {"thread_id": "test-clear-jira-task"}},
+        )
 
-        Query: "Explain how bubble sort works"
-        Expected: Routes to researcher for explanation
-        """
+        # Verify response
+        assert result["messages"]
+        assert len(result["messages"]) >= 2  # At least user + assistant
+
+    async def test_clear_coder_flow(self, graph):
         result = await graph.ainvoke(
             {
                 "messages": [
@@ -29,12 +37,6 @@ class TestClearQueryFlows:
         assert len(result["messages"]) >= 2  # At least user + assistant
     
     async def test_ambiguos_coder_flow(self, graph):
-        """
-        Clear research query: orchestrator → classifier → researcher.
-
-        Query: "Explain how bubble sort works"
-        Expected: Routes to researcher for explanation
-        """
         result = await graph.ainvoke(
             {
                 "messages": [
@@ -49,12 +51,6 @@ class TestClearQueryFlows:
         assert len(result["messages"]) >= 2  # At least user + assistant
 
     async def test_clear_research_internet_flow(self, graph):
-        """
-        Clear research query: orchestrator → classifier → researcher.
-
-        Query: "Explain how bubble sort works"
-        Expected: Routes to researcher for explanation
-        """
         result = await graph.ainvoke(
             {
                 "messages": [
