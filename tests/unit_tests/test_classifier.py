@@ -39,11 +39,13 @@ class TestClassifierClearQueries:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -75,11 +77,13 @@ class TestClassifierClearQueries:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -108,11 +112,13 @@ class TestClassifierClearQueries:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -144,11 +150,13 @@ class TestClassifierExplainVsImplement:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -177,11 +185,13 @@ class TestClassifierExplainVsImplement:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -210,11 +220,13 @@ class TestClassifierExplainVsImplement:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -248,11 +260,13 @@ class TestClassifierFollowUpQueries:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -286,11 +300,13 @@ class TestClassifierStructuredOutput:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm
@@ -319,11 +335,13 @@ class TestClassifierStructuredOutput:
         )
 
         with patch("agent.graph.ModelAgent") as mock_ma:
-            mock_llm = AsyncMock()
+            # Mock the structured LLM
             mock_structured_llm = AsyncMock()
             mock_structured_llm.ainvoke.return_value = mock_result
 
-            mock_llm.with_structured_output.return_value = mock_structured_llm
+            # Mock the base LLM with sync with_structured_output method
+            mock_llm = Mock()
+            mock_llm.with_structured_output = Mock(return_value=mock_structured_llm)
 
             mock_instance = Mock()
             mock_instance.load_model.return_value = mock_llm

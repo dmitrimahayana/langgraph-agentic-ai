@@ -11,7 +11,7 @@ from typing_extensions import TypedDict
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from deepagents import create_deep_agent
-from src.agent.model import ModelAgent
+from agent.model import ModelAgent
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 from langgraph.types import Send
