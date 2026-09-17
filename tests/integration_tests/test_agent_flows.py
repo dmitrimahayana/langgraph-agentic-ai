@@ -8,6 +8,66 @@ pytestmark = pytest.mark.anyio
 class TestClearQueryFlows:
     """Test complete flows for clear, unambiguous queries."""
 
+    async def test_clear_coder_flow(self, graph):
+        """
+        Clear research query: orchestrator → classifier → researcher.
+
+        Query: "Explain how bubble sort works"
+        Expected: Routes to researcher for explanation
+        """
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "create implementation of binary search in python"}
+                ]
+            },
+            config={"configurable": {"thread_id": "test-clear-coder-task"}},
+        )
+
+        # Verify response
+        assert result["messages"]
+        assert len(result["messages"]) >= 2  # At least user + assistant
+    
+    async def test_ambiguos_coder_flow(self, graph):
+        """
+        Clear research query: orchestrator → classifier → researcher.
+
+        Query: "Explain how bubble sort works"
+        Expected: Routes to researcher for explanation
+        """
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "Improve the authentication system"}
+                ]
+            },
+            config={"configurable": {"thread_id": "test-ambiguos-coder-task"}},
+        )
+
+        # Verify response
+        assert result["messages"]
+        assert len(result["messages"]) >= 2  # At least user + assistant
+
+    async def test_clear_research_internet_flow(self, graph):
+        """
+        Clear research query: orchestrator → classifier → researcher.
+
+        Query: "Explain how bubble sort works"
+        Expected: Routes to researcher for explanation
+        """
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "what bitcoin price today"}
+                ]
+            },
+            config={"configurable": {"thread_id": "test-clear-research"}},
+        )
+
+        # Verify response
+        assert result["messages"]
+        assert len(result["messages"]) >= 2  # At least user + assistant
+
     async def test_clear_research_query_flow(self, graph):
         """
         Clear research query: orchestrator → classifier → researcher.
