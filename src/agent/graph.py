@@ -282,22 +282,22 @@ builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("coder", coder_agent)
 # builder.add_node("jira", jira_agent)
-builder.add_node("evaluator", evaluator)
+# builder.add_node("evaluator", evaluator)
 # builder.add_node("classifier", classify_query)
 # builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
 
 
 # Start with orchestrator
 builder.add_edge(START, "orchestrator")
-builder.add_edge("orchestrator", "evaluator")
-builder.add_conditional_edges(
-    "evaluator",
-    progress_router,
-    {
-        "NEXT": "orchestrator",
-        "END": END
-    },
-)
+# builder.add_edge("orchestrator", "evaluator")
+# builder.add_conditional_edges(
+#     "evaluator",
+#     progress_router,
+#     {
+#         "NEXT": "orchestrator",
+#         "END": END
+#     },
+# )
 
 # After specialist agents complete, go to END
 # builder.add_edge("researcher", END)
