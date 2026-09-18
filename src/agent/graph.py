@@ -13,7 +13,6 @@ from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
 from langchain_community.utilities.jira import JiraAPIWrapper
-from src.tools.slack.Slack import get_slack_tools
 from deepagents.backends import StateBackend
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
