@@ -10,7 +10,7 @@ from langchain.tools import tool, ToolRuntime
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
-from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
 from langchain_community.utilities.jira import JiraAPIWrapper
 from deepagents.backends import StateBackend
@@ -31,11 +31,30 @@ import os
 # once finished. The invoked node can directly alter/update the State. the caller then read the altered State
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
-search_tool = DuckDuckGoSearchRun()
-jira_api = JiraAPIWrapper()
-jira_toolkit = JiraToolkit.from_jira_api_wrapper(jira_api)
 model_agent = ModelAgent()
 base_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Lazy initialization for search tool - requires TAVILY_API_KEY env var
+_search_tool = None
+def get_search_tool():
+    global _search_tool
+    if _search_tool is None:
+        _search_tool = TavilySearchResults(
+            max_results=5,
+            search_depth="advanced",
+            include_answer=True,
+            include_raw_content=False,
+        )
+    return _search_tool
+
+# Lazy initialization for Jira - only create when needed
+_jira_toolkit = None
+def get_jira_toolkit():
+    global _jira_toolkit
+    if _jira_toolkit is None:
+        jira_api = JiraAPIWrapper()
+        _jira_toolkit = JiraToolkit.from_jira_api_wrapper(jira_api)
+    return _jira_toolkit
 
 
 class Context(TypedDict, total=False):
@@ -162,7 +181,7 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
 
     agent = create_agent(
         model=model,
-        tools=[search_tool],
+        tools=[get_search_tool()],
         system_prompt=soul,
     )
     last_msg = state["messages"][-1]
@@ -213,7 +232,7 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("jira_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    tools = jira_toolkit.get_tools()
+    tools = get_jira_toolkit().get_tools()
 
     agent = create_agent(
         model=model,
@@ -262,7 +281,7 @@ builder = StateGraph(RouterState, context_schema=Context)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("coder", coder_agent)
-builder.add_node("jira", jira_agent)
+# builder.add_node("jira", jira_agent)
 builder.add_node("evaluator", evaluator)
 # builder.add_node("classifier", classify_query)
 # builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
