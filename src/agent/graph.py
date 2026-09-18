@@ -125,21 +125,6 @@ def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
         graph=Command.PARENT,
     )
 
-@tool
-def handoff_to_slack_agent(task: str, runtime: ToolRuntime) -> Command:
-    """Delegate slack tasks to the slack agent.
-    Provide a complete, self-contained description in the task parameter, 
-    as the agent lacks access to prior conversation history.
-    """
-    return Command(
-        goto="slack",
-        update={"messages": [ToolMessage(
-            content=f"Handed off to slack with task: {task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
-        graph=Command.PARENT,
-    )
-
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -159,43 +144,13 @@ async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> D
         tools=[
             handoff_to_researcher_agent,
             handoff_to_coder_agent,
-            handoff_to_jira_agent,
-            handoff_to_slack_agent
+            handoff_to_jira_agent
             ],
         system_prompt=soul,
     )
     result = await agent.ainvoke({"messages": state["messages"]})
 
     return {"messages": result["messages"]}
-
-
-# async def classify_query(state: RouterState, runtime: Runtime[Context]) -> dict:
-#     """Classify query and determine which agents to invoke."""
-#     from langchain_core.messages import SystemMessage
-
-#     file_path = os.path.join(base_dir, "souls", "router", "SOUL.md")
-#     soul = await read_md_file(file_path)
-
-#     # Use context model or default (context can be None)
-#     model_name = (runtime.context or {}).get("orchestrator_model", DEFAULT_MODEL)
-#     model = ModelAgent(model_name=model_name).load_model()
-#     structured_llm = model.with_structured_output(ClassificationResult)
-
-#     # Build messages with system prompt + conversation history
-#     messages = [SystemMessage(content=soul)] + state["messages"]
-
-#     # Call structured LLM directly (not via create_agent)
-#     result = await structured_llm.ainvoke(messages)
-
-#     return {"classifications": result.classifications}
-
-
-# async def route_to_agents(state: RouterState) -> list[Send]:
-#     """Fan out to agents based on classifications."""
-#     return [
-#         Send(c["source"], {"messages": state["messages"], "query": c["query"]})
-#         for c in state["classifications"]
-#     ]
 
 
 async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
@@ -279,33 +234,6 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
         "results": [{"source": "jira", "result": str(result["messages"][-1].content)}]
     }
 
-async def slack_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-    file_path = os.path.join(base_dir, "souls", "slack", "SOUL.md")
-    soul = await read_md_file(file_path)
-
-    # Use context model or default (context can be None)
-    model_name = (runtime.context or {}).get("slack_model", DEFAULT_MODEL)
-    model = ModelAgent(model_name=model_name).load_model()
-    tools = get_slack_tools()
-
-    agent = create_agent(
-        model=model,
-        tools=tools,
-        system_prompt=soul
-    )
-    last_msg = state["messages"][-1]
-    human_msg = HumanMessage(content=last_msg.content)
-    # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": [human_msg]})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
-    # Return results with source tracking
-    return {
-        "messages": result["messages"],
-        "results": [{"source": "slack", "result": str(result["messages"][-1].content)}]
-    }
-
 async def evaluator(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     file_path = os.path.join(base_dir, "souls", "evaluator", "SOUL.md")
     soul = await read_md_file(file_path)
@@ -336,7 +264,6 @@ builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("coder", coder_agent)
 builder.add_node("jira", jira_agent)
-builder.add_node("slack", slack_agent)
 builder.add_node("evaluator", evaluator)
 # builder.add_node("classifier", classify_query)
 # builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
