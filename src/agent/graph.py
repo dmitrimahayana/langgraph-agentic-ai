@@ -13,12 +13,14 @@ from langchain.agents import create_agent
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
 from langchain_community.utilities.jira import JiraAPIWrapper
-from deepagents.backends import StateBackend
+from deepagents.backends import StateBackend, FilesystemBackend
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
 from langchain.messages import ToolMessage, HumanMessage
 from pydantic import BaseModel, Field
-from langgraph.types import Send, Command
+from langgraph.types import Command
+from langsmith.sandbox import SandboxClient
+from deepagents.backends import LangSmithSandbox
 import operator
 import os
 
@@ -33,6 +35,9 @@ import os
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 model_agent = ModelAgent()
 base_dir = os.path.dirname(os.path.abspath(__file__))
+client = SandboxClient()
+ls_sandbox = client.create_sandbox()
+backend = LangSmithSandbox(sandbox=ls_sandbox)
 
 # Lazy initialization for search tool - requires TAVILY_API_KEY env var
 _search_tool = None
@@ -210,7 +215,7 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
         model=model,
         tools=[],
         system_prompt=soul,
-        backend=StateBackend()
+        backend=backend
     )
     last_msg = state["messages"][-1]
     human_msg = HumanMessage(content=last_msg.content)
