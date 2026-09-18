@@ -13,10 +13,11 @@ from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
 from langchain_community.utilities.jira import JiraAPIWrapper
+from src.tools.slack.Slack import get_slack_tools
 from deepagents.backends import StateBackend
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
-from langchain.messages import ToolMessage
+from langchain.messages import ToolMessage, HumanMessage
 from pydantic import BaseModel, Field
 from langgraph.types import Send, Command
 import operator
@@ -49,6 +50,8 @@ class Context(TypedDict, total=False):
     researcher_model: str
     coder_model: str
 
+class Progress(BaseModel):
+    progress: Literal["NEXT_STEP", "END"] = Field()
 
 class Classification(TypedDict):
     """A single routing decision: which agent to call with what query."""
@@ -65,6 +68,7 @@ class AgentOutput(TypedDict):
 class RouterState(MessagesState):
     """State that maintains conversation history via messages."""
     classifications: list[Classification]
+    check_progress: str
     results: Annotated[list[AgentOutput], operator.add]  # Reducer collects parallel results
 
 
@@ -121,6 +125,21 @@ def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
         graph=Command.PARENT,
     )
 
+@tool
+def handoff_to_slack_agent(task: str, runtime: ToolRuntime) -> Command:
+    """Delegate slack tasks to the slack agent.
+    Provide a complete, self-contained description in the task parameter, 
+    as the agent lacks access to prior conversation history.
+    """
+    return Command(
+        goto="slack",
+        update={"messages": [ToolMessage(
+            content=f"Handed off to slack with task: {task}",
+            tool_call_id=runtime.tool_call_id,
+        )]},
+        graph=Command.PARENT,
+    )
+
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -138,9 +157,10 @@ async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> D
     agent = create_agent(
         model=model,
         tools=[
-            handoff_to_researcher_agent, 
+            handoff_to_researcher_agent,
             handoff_to_coder_agent,
-            handoff_to_jira_agent
+            handoff_to_jira_agent,
+            handoff_to_slack_agent
             ],
         system_prompt=soul,
     )
@@ -191,10 +211,13 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
         tools=[search_tool],
         system_prompt=soul,
     )
-
+    last_msg = state["messages"][-1]
+    human_msg = HumanMessage(content=last_msg.content)
     # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": state["messages"]})
-
+    result = await agent.ainvoke({"messages": [human_msg]})
+    result["messages"] = [
+        m for m in result["messages"] if not isinstance(m, HumanMessage)
+    ]
     # Return results with source tracking
     return {
         "messages": result["messages"],
@@ -216,10 +239,13 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
         system_prompt=soul,
         backend=StateBackend()
     )
-
+    last_msg = state["messages"][-1]
+    human_msg = HumanMessage(content=last_msg.content)
     # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": state["messages"]})
-
+    result = await agent.ainvoke({"messages": [human_msg]})
+    result["messages"] = [
+        m for m in result["messages"] if not isinstance(m, HumanMessage)
+    ]
     # Return results with source tracking
     return {
         "messages": result["messages"],
@@ -235,21 +261,74 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
     model = ModelAgent(model_name=model_name).load_model()
     tools = jira_toolkit.get_tools()
 
-    agent = create_deep_agent(
+    agent = create_agent(
         model=model,
         tools=tools,
         system_prompt=soul,
-        backend=StateBackend()
     )
+    last_msg = state["messages"][-1]
+    human_msg = HumanMessage(content=last_msg.content)
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": [human_msg]})
+    result["messages"] = [
+        m for m in result["messages"] if not isinstance(m, HumanMessage)
+    ]
+    # Return results with source tracking
+    return {
+        "messages": result["messages"],
+        "results": [{"source": "jira", "result": str(result["messages"][-1].content)}]
+    }
 
+async def slack_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    file_path = os.path.join(base_dir, "souls", "slack", "SOUL.md")
+    soul = await read_md_file(file_path)
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("slack_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+    tools = get_slack_tools()
+
+    agent = create_agent(
+        model=model,
+        tools=tools,
+        system_prompt=soul
+    )
+    last_msg = state["messages"][-1]
+    human_msg = HumanMessage(content=last_msg.content)
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": [human_msg]})
+    result["messages"] = [
+        m for m in result["messages"] if not isinstance(m, HumanMessage)
+    ]
+    # Return results with source tracking
+    return {
+        "messages": result["messages"],
+        "results": [{"source": "slack", "result": str(result["messages"][-1].content)}]
+    }
+
+async def evaluator(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    file_path = os.path.join(base_dir, "souls", "evaluator", "SOUL.md")
+    soul = await read_md_file(file_path)
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("evaluator", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+
+    agent = create_agent(
+        model=model,
+        system_prompt=soul
+    )
     # Invoke with conversation context - agent will see full message history
     result = await agent.ainvoke({"messages": state["messages"]})
 
     # Return results with source tracking
-    return {
-        "messages": result["messages"],
-        "results": [{"source": "coder", "result": str(result["messages"][-1].content)}]
-    }
+    return {"check_progress": result["messages"][-1].content}
+
+def progress_router(state: RouterState):
+    if state["check_progress"] == "NEXT_STEP":
+        return "NEXT"
+    elif state["check_progress"] == "END":
+        return "END"
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
@@ -257,13 +336,23 @@ builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("coder", coder_agent)
 builder.add_node("jira", jira_agent)
+builder.add_node("slack", slack_agent)
+builder.add_node("evaluator", evaluator)
 # builder.add_node("classifier", classify_query)
 # builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
 
 
 # Start with orchestrator
 builder.add_edge(START, "orchestrator")
-builder.add_edge("orchestrator", END)
+builder.add_edge("orchestrator", "evaluator")
+builder.add_conditional_edges(
+    "evaluator",
+    progress_router,
+    {
+        "NEXT": "orchestrator",
+        "END": END
+    },
+)
 
 # After specialist agents complete, go to END
 # builder.add_edge("researcher", END)

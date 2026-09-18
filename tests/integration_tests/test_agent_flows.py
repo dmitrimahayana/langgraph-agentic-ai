@@ -8,6 +8,20 @@ pytestmark = pytest.mark.anyio
 class TestClearQueryFlows:
     """Test complete flows for clear, unambiguous queries."""
 
+    async def test_clear_slack_flow(self, graph):
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    {"role": "user", "content": "is there any unsolved ticket on aws phokus project? if so make summarize please and send it to my slack"}
+                ]
+            },
+            config={"configurable": {"thread_id": "test-clear-slack-task"}},
+        )
+
+        # Verify response
+        assert result["messages"]
+        assert len(result["messages"]) >= 2  # At least user + assistant
+
     async def test_clear_jira_flow(self, graph):
         result = await graph.ainvoke(
             {
