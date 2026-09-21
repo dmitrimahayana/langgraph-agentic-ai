@@ -49,6 +49,32 @@ For more information on getting started with LangGraph Server, [see here](https:
 
 2. **Extend the graph**: The core logic of the application is defined in [graph.py](./src/agent/graph.py). You can modify this file to add new nodes, edges, or change the flow of information.
 
+## Web Frontend
+
+A simple web UI is included for interacting with your LangGraph agent.
+
+### Quick Start
+
+1. Start LangGraph server:
+   ```bash
+   langgraph up
+   ```
+
+2. Start the frontend (in a new terminal):
+   ```bash
+   ./start-frontend.sh
+   ```
+
+3. Open http://localhost:8080
+
+The frontend includes:
+- Clean chat interface with streaming responses
+- Thread management for conversation persistence
+- Multi-agent status tracking
+- CORS proxy to connect to LangGraph API
+
+See [static/README.md](static/README.md) for more details.
+
 ## Development
 
 While iterating on your graph in LangGraph Studio, you can edit past state and rerun your app from previous states to debug specific nodes. Local changes will be automatically applied via hot reload.
