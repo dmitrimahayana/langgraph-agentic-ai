@@ -33,7 +33,6 @@ import os
 # once finished. The invoked node can directly alter/update the State. the caller then read the altered State
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
-model_agent = ModelAgent()
 base_dir = os.path.dirname(os.path.abspath(__file__))
 client = SandboxClient()
 ls_sandbox = client.create_sandbox()
