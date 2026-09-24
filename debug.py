@@ -1,9 +1,24 @@
 import asyncio
 from dotenv import load_dotenv
 load_dotenv()
-
-from tests.integration_tests.test_agent_flows import TestClearQueryFlows
 from src.agent.graph import graph
 
-flow_test = TestClearQueryFlows()
-result = asyncio.run(flow_test.test_clear_slack_flow(graph))
+config = {"configurable": {"thread_id": "test-multi-round-conversation"}}
+    
+while True:
+    user_input = input("\nUser: ")
+    if user_input.lower() in ["exit", "quit", "q"]:
+        print("Ending conversation.")
+        break
+        
+    if not user_input.strip():
+        continue
+
+    result = asyncio.run(graph.ainvoke(
+        {"messages": [{"role": "user", "content": user_input}]},
+        config=config,
+    ))
+    
+    # Print the latest response from the graph
+    latest_message = result["messages"][-1]
+    print(f"\nAssistant: {latest_message.content}")
