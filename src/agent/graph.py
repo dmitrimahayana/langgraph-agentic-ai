@@ -384,8 +384,4 @@ builder.add_edge(START, "orchestrator")
 # LangGraph API provides persistence automatically
 # - langgraph dev: in-memory checkpointer
 # - production deploy: PostgreSQL checkpointer (uses POSTGRES_URI from .env)
-# graph = builder.compile()
-
-from langgraph.checkpoint.memory import InMemorySaver
-checkpointer = InMemorySaver()
-graph = builder.compile(checkpointer=checkpointer)
+graph = builder.compile()

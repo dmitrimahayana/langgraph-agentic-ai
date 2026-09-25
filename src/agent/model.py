@@ -11,7 +11,7 @@ class ModelAgent:
     def load_model(self):
         if self.model_name.startswith("ollama:"):
             new_model_name = self.model_name.split("ollama:")[1]
-            print(f"Loading Ollama model: {new_model_name}")
+            # print(f"Loading Ollama model: {new_model_name}")
 
             # Auto-detect Ollama base URL
             # Priority: OLLAMA_BASE_URL env var > auto-detect Docker > localhost
@@ -22,11 +22,11 @@ class ModelAgent:
                 if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
                     # Running in container - use host.docker.internal
                     base_url = "http://host.docker.internal:11434"
-                    print("Detected Docker environment, using host.docker.internal")
+                    # print("Detected Docker environment, using host.docker.internal")
                 else:
                     # Running locally - use localhost
                     base_url = "http://localhost:11434"
-                    print("Detected local environment, using localhost")
+                    # print("Detected local environment, using localhost")
 
             return ChatOllama(
                 model=new_model_name,
