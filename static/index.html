@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Agent Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            border-radius: 16px 16px 0 0;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .config-panel {
+            padding: 16px 24px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .config-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .config-row label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .config-row input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.assistant {
+            align-items: flex-start;
+        }
+
+        .message-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            border: 1px solid #e9ecef;
+            color: #212529;
+        }
+
+        .agent-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .agent-badge.orchestrator {
+            background: #e7f3ff;
+            color: #0066cc;
+        }
+
+        .agent-badge.researcher {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .agent-badge.coder {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .input-container {
+            padding: 24px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 12px;
+        }
+
+        .input-container textarea {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            height: 48px;
+        }
+
+        .input-container textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-container button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .input-container button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .input-container button:active {
+            transform: translateY(0);
+        }
+
+        .input-container button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 8px 16px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            margin: 8px 24px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #856404;
+        }
+
+        .error {
+            padding: 8px 16px;
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            margin: 8px 24px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #721c24;
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 12px 16px;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            width: fit-content;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #667eea;
+            animation: bounce 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-8px);
+            }
+        }
+
+        .new-chat-btn {
+            margin-left: auto;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .new-chat-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div style="display: flex; align-items: center;">
+                <div>
+                    <h1>LangGraph Agent Chat</h1>
+                    <p>Multi-agent system with orchestrator, researcher, and coder</p>
+                </div>
+                <button class="new-chat-btn" onclick="startNewChat()">New Chat</button>
+            </div>
+        </div>
+
+        <div class="config-panel">
+            <div class="config-row">
+                <label>API URL:</label>
+                <input type="text" id="apiUrl" value="/api" placeholder="/api or http://localhost:8123">
+                <label>Assistant:</label>
+                <input type="text" id="assistantId" value="agent" placeholder="agent" style="width: 100px;">
+                <label>Thread ID:</label>
+                <input type="text" id="threadId" value="" placeholder="Auto-generated">
+            </div>
+        </div>
+
+        <div class="chat-container" id="chatContainer"></div>
+
+        <div class="input-container">
+            <textarea
+                id="messageInput"
+                placeholder="Ask me anything... I can research the web, write code, and more!"
+                onkeydown="handleKeyPress(event)"
+            ></textarea>
+            <button id="sendButton" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let threadId = null;
+        let isProcessing = false;
+
+        function generateThreadId() {
+            // Generate a valid UUID v4
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function startNewChat() {
+            threadId = generateThreadId();
+            document.getElementById('threadId').value = threadId;
+            document.getElementById('chatContainer').innerHTML = '';
+            addMessage('assistant', 'New conversation started. How can I help you today?');
+        }
+
+        function getApiUrl() {
+            return document.getElementById('apiUrl').value || 'http://localhost:2024';
+        }
+
+        function getThreadId() {
+            let tid = document.getElementById('threadId').value;
+            if (!tid) {
+                tid = threadId || generateThreadId();
+                threadId = tid;
+                document.getElementById('threadId').value = tid;
+            }
+            return tid;
+        }
+
+        function getAssistantId() {
+            return document.getElementById('assistantId').value || 'agent';
+        }
+
+        function addMessage(role, content, agent = null) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'message-label';
+
+            if (agent) {
+                const badge = document.createElement('span');
+                badge.className = `agent-badge ${agent}`;
+                badge.textContent = agent;
+                labelDiv.appendChild(badge);
+                labelDiv.appendChild(document.createTextNode(' '));
+            }
+
+            labelDiv.appendChild(document.createTextNode(role));
+            messageDiv.appendChild(labelDiv);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+            messageDiv.appendChild(contentDiv);
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function showTyping() {
+            const chatContainer = document.getElementById('chatContainer');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant';
+            typingDiv.id = 'typing-indicator';
+
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'message-label';
+            labelDiv.textContent = 'assistant';
+            typingDiv.appendChild(labelDiv);
+
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator';
+            indicator.innerHTML = '<span></span><span></span><span></span>';
+            typingDiv.appendChild(indicator);
+
+            chatContainer.appendChild(typingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTyping() {
+            const typing = document.getElementById('typing-indicator');
+            if (typing) {
+                typing.remove();
+            }
+        }
+
+        function showStatus(message) {
+            const existing = document.querySelector('.status');
+            if (existing) existing.remove();
+
+            const chatContainer = document.getElementById('chatContainer');
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'status';
+            statusDiv.textContent = message;
+            chatContainer.appendChild(statusDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            setTimeout(() => statusDiv.remove(), 3000);
+        }
+
+        function showError(message) {
+            hideTyping();
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function ensureThread(apiUrl, tid) {
+            // Check if thread exists, create if not
+            try {
+                const checkResponse = await fetch(`${apiUrl}/threads/${tid}`);
+                if (checkResponse.status === 404) {
+                    // Create thread
+                    const createResponse = await fetch(`${apiUrl}/threads`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ thread_id: tid })
+                    });
+                    if (!createResponse.ok) {
+                        throw new Error(`Failed to create thread: ${createResponse.status}`);
+                    }
+                }
+            } catch (e) {
+                // If check fails, try creating anyway
+                const createResponse = await fetch(`${apiUrl}/threads`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ thread_id: tid })
+                });
+                if (!createResponse.ok && createResponse.status !== 409) {
+                    // 409 = already exists, which is fine
+                    throw new Error(`Failed to create thread: ${createResponse.status}`);
+                }
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || isProcessing) return;
+
+            isProcessing = true;
+            document.getElementById('sendButton').disabled = true;
+
+            addMessage('user', message);
+            input.value = '';
+            showTyping();
+
+            try {
+                const apiUrl = getApiUrl();
+                const tid = getThreadId();
+                const assistantId = getAssistantId();
+
+                // Ensure thread exists
+                await ensureThread(apiUrl, tid);
+
+                const response = await fetch(`${apiUrl}/threads/${tid}/runs/stream`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        assistant_id: assistantId,
+                        input: {
+                            messages: [
+                                {
+                                    role: 'user',
+                                    content: message
+                                }
+                            ]
+                        },
+                        stream_mode: 'messages'
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+
+                hideTyping();
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let currentEvent = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.trim()) {
+                            currentEvent = null;
+                            continue;
+                        }
+
+                        if (line.startsWith('event: ')) {
+                            currentEvent = line.slice(7).trim();
+                        } else if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                // Handle messages/complete or messages/partial events
+                                if (currentEvent === 'messages/complete' || currentEvent === 'messages/partial') {
+                                    const msgs = Array.isArray(data) ? data : [data];
+                                    for (const msg of msgs) {
+                                        if (msg.type === 'ai' && msg.content) {
+                                            addMessage('assistant', msg.content);
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Parse error:', e, line);
+                            }
+                        }
+                    }
+                }
+
+                // Messages are added during streaming, no need to add here
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError(`Error: ${error.message}. Make sure LangGraph server is running on ${getApiUrl()}`);
+            } finally {
+                isProcessing = false;
+                document.getElementById('sendButton').disabled = false;
+                hideTyping();
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // Initialize
+        window.onload = () => {
+            startNewChat();
+        };
+    </script>
+</body>
+</html>

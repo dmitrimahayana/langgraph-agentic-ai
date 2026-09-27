@@ -12,6 +12,7 @@ from typing_extensions import TypedDict
 from langchain.agents import create_agent
 from langchain_community.tools.tavily_search import TavilySearchResults
 from deepagents.backends import StateBackend, FilesystemBackend
+from langchain.agents.middleware import HumanInTheLoopMiddleware 
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
 from langchain.messages import ToolMessage, HumanMessage
@@ -32,11 +33,11 @@ import os
 # once finished. The invoked node can directly alter/update the State. the caller then read the altered State
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
-model_agent = ModelAgent()
 base_dir = os.path.dirname(os.path.abspath(__file__))
-# client = SandboxClient()
-# ls_sandbox = client.create_sandbox()
-# backend = LangSmithSandbox(sandbox=ls_sandbox)
+# client = SandboxClient()  # DEV: disabled to avoid quota
+# ls_sandbox = client.create_sandbox()  # DEV: disabled to avoid quota
+# backend = LangSmithSandbox(sandbox=ls_sandbox) # PROD
+backend = StateBackend() # DEV
 
 # Lazy initialization for search tool - requires TAVILY_API_KEY env var
 _search_tool = None
@@ -104,6 +105,27 @@ class ClassificationResult(BaseModel):
         description="List of agents to invoke with their targeted sub-questions"
     )
 
+# File system tools
+@tool
+def write_file(file_path: str, content: str) -> str:
+    """Write content to a file at the specified path.
+
+    Args:
+        file_path: The path where the file should be written
+        content: The content to write to the file
+
+    Returns:
+        Success message with file path
+    """
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"Successfully wrote to {file_path}"
+    except Exception as e:
+        return f"Error writing to {file_path}: {str(e)}"
+
 # Agent wrap tool
 @tool
 def handoff_to_researcher_agent(task: str, runtime: ToolRuntime) -> Command:
@@ -123,13 +145,27 @@ def handoff_to_researcher_agent(task: str, runtime: ToolRuntime) -> Command:
 @tool
 def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
     """Delegate coding and filesystem tasks to the coder agent.
-    Provide a complete, self-contained description in the task parameter, 
+    Provide a complete, self-contained description in the task parameter,
     as the agent lacks access to prior conversation history.
+    """
+    return Command(
+        goto="coding_planner",
+        update={"messages": [ToolMessage(
+            content=f"Handed off to coding planner with task: {task}",
+            tool_call_id=runtime.tool_call_id,
+        )]},
+        graph=Command.PARENT,
+    )
+
+@tool
+def handoff_from_planner_to_coder(task: str, runtime: ToolRuntime) -> Command:
+    """Hand off from coding planner to coder agent with implementation plan.
+    Provide the detailed plan and task description.
     """
     return Command(
         goto="coder",
         update={"messages": [ToolMessage(
-            content=f"Handed off to coder with task: {task}",
+            content=f"Handed off to coder from planner: {task}",
             tool_call_id=runtime.tool_call_id,
         )]},
         graph=Command.PARENT,
@@ -271,6 +307,42 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
     }
 
 
+async def coding_planner_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    file_path = os.path.join(base_dir, "souls", "coding_planner", "SOUL.md")
+    soul = await read_md_file(file_path)
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+
+    agent = create_deep_agent(
+        model=model,
+        tools=[handoff_from_planner_to_coder],
+        system_prompt=soul,
+        backend=backend,
+        middleware=[
+            HumanInTheLoopMiddleware(
+                interrupt_on={
+                    "handoff_from_planner_to_coder": True,  # Review plan before handoff
+                },
+                description_prefix="Review implementation plan before handoff to coder",
+            ),
+        ],
+    )
+    last_msg = state["messages"][-1]
+    human_msg = HumanMessage(content=last_msg.content)
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": [human_msg]})
+    result["messages"] = [
+        m for m in result["messages"] if not isinstance(m, HumanMessage)
+    ]
+    # Return results with source tracking
+    return {
+        "messages": result["messages"],
+        "results": [{"source": "coding_planner", "result": str(result["messages"][-1].content)}]
+    }
+
+
 async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_dir, "souls", "coder", "SOUL.md")
@@ -283,9 +355,9 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
 
     agent = create_deep_agent(
         model=model,
-        tools=[],
+        tools=[write_file],
         system_prompt=soul,
-        backend=FilesystemBackend(root_dir=storage_dir)
+        backend=backend,
     )
     last_msg = state["messages"][-1]
     human_msg = HumanMessage(content=last_msg.content)
@@ -364,6 +436,7 @@ builder = StateGraph(RouterState, context_schema=Context)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("orchestrator_jira", jira_mode_orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
+builder.add_node("coding_planner", coding_planner_agent)
 builder.add_node("coder", coder_agent)
 builder.add_node("jira", jira_agent)
 builder.add_node("evaluator", evaluator)
@@ -407,9 +480,4 @@ builder.add_conditional_edges(
 # LangGraph API provides persistence automatically
 # - langgraph dev: in-memory checkpointer
 # - production deploy: PostgreSQL checkpointer (uses POSTGRES_URI from .env)
-
-# graph = builder.compile()
-
-from langgraph.checkpoint.memory import InMemorySaver
-checkpointer = InMemorySaver()
-graph = builder.compile(checkpointer=checkpointer)
+graph = builder.compile()
