@@ -11,7 +11,7 @@ from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
 from langchain_community.tools.tavily_search import TavilySearchResults
-from deepagents.backends import StateBackend, FilesystemBackend
+from deepagents.backends import StateBackend, FilesystemBackend, LocalShellBackend
 from langchain.agents.middleware import HumanInTheLoopMiddleware 
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
@@ -34,10 +34,17 @@ import os
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 base_dir = os.path.dirname(os.path.abspath(__file__))
+WORKDIR = os.path.abspath("./poc_workspace")
+os.makedirs(WORKDIR, exist_ok=True)
 # client = SandboxClient()  # DEV: disabled to avoid quota
 # ls_sandbox = client.create_sandbox()  # DEV: disabled to avoid quota
 # backend = LangSmithSandbox(sandbox=ls_sandbox) # PROD
 backend = StateBackend() # DEV
+backend_shell = LocalShellBackend(
+    root_dir=WORKDIR,
+    # Pass an explicit, minimal PATH instead of inheriting your full env.
+    env={"PATH": "/usr/bin:/bin"},
+) # DEV 2 very risky be carefull!! check if HITL is activated
 
 # Lazy initialization for search tool - requires TAVILY_API_KEY env var
 _search_tool = None
@@ -357,7 +364,15 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
         model=model,
         tools=[write_file],
         system_prompt=soul,
-        backend=backend,
+        backend=backend_shell,
+        middleware=[
+            HumanInTheLoopMiddleware(
+                interrupt_on={
+                    "execute": True,  # Review plan before handoff
+                },
+                description_prefix="review shell execution before running it",
+            ),
+        ],
     )
     last_msg = state["messages"][-1]
     human_msg = HumanMessage(content=last_msg.content)
@@ -446,32 +461,33 @@ builder.add_node("bridge", bridge)
 
 
 # Start with orchestrator
-builder.add_conditional_edges(
-    START,
-    check_mode,
-    {
-        "JIRA": "orchestrator_jira",
-        "GENERAL": "orchestrator"
-    },
-)
-builder.add_edge("orchestrator", "evaluator")
-builder.add_edge("orchestrator_jira", "evaluator")
-builder.add_conditional_edges(
-    "bridge",
-    check_mode,
-    {
-        "JIRA": "orchestrator_jira",
-        "GENERAL": "orchestrator"
-    },
-)
-builder.add_conditional_edges(
-    "evaluator",
-    progress_router,
-    {
-        "NEXT": "bridge",
-        "END": END
-    },
-)
+builder.add_edge(START, "orchestrator")
+# builder.add_conditional_edges(
+#     START,
+#     check_mode,
+#     {
+#         "JIRA": "orchestrator_jira",
+#         "GENERAL": "orchestrator"
+#     },
+# )
+# builder.add_edge("orchestrator", "evaluator")
+# builder.add_edge("orchestrator_jira", "evaluator")
+# builder.add_conditional_edges(
+#     "bridge",
+#     check_mode,
+#     {
+#         "JIRA": "orchestrator_jira",
+#         "GENERAL": "orchestrator"
+#     },
+# )
+# builder.add_conditional_edges(
+#     "evaluator",
+#     progress_router,
+#     {
+#         "NEXT": "bridge",
+#         "END": END
+#     },
+# )
 
 # After specialist agents complete, go to END
 # builder.add_edge("researcher", END)
