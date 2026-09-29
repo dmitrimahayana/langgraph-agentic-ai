@@ -10,7 +10,7 @@ import urllib.error
 import json
 import os
 
-LANGGRAPH_API = "http://localhost:8123"
+LANGGRAPH_API = "http://localhost:2024"
 
 class ProxyHandler(SimpleHTTPRequestHandler):
     def do_GET(self):

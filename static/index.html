@@ -275,6 +275,130 @@
         .new-chat-btn:hover {
             background: rgba(255, 255, 255, 0.3);
         }
+
+        .interrupt-panel {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+
+        .interrupt-panel h3 {
+            color: #856404;
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        .interrupt-plan {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .interrupt-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .interrupt-buttons button {
+            flex: 1;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .approve-btn {
+            background: #28a745;
+            color: white;
+        }
+
+        .approve-btn:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+
+        .reject-btn {
+            background: #dc3545;
+            color: white;
+        }
+
+        .reject-btn:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+        }
+
+        .progress-panel {
+            background: #e7f3ff;
+            border: 2px solid #0066cc;
+            border-left: 4px solid #0066cc;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 12px 0;
+            display: flex !important;
+            align-items: center;
+            gap: 12px;
+            min-height: 60px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .progress-spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #0066cc;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .progress-text {
+            flex: 1;
+            font-size: 14px;
+            color: #0066cc;
+            font-weight: 500;
+        }
+
+        .progress-steps {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .progress-step {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .progress-step.active {
+            background: #0066cc;
+            color: white;
+        }
+
+        .progress-step.completed {
+            background: #28a745;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -315,6 +439,8 @@
     <script>
         let threadId = null;
         let isProcessing = false;
+        let currentInterrupt = null;
+        let progressSteps = [];
 
         function generateThreadId() {
             // Generate a valid UUID v4
@@ -429,6 +555,465 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        function showInterruptPanel(plan) {
+            // Check if panel already exists
+            const existing = document.getElementById('interrupt-panel');
+            if (existing) {
+                console.log('[INTERRUPT PANEL] Already exists, skipping duplicate');
+                return;
+            }
+
+            const chatContainer = document.getElementById('chatContainer');
+
+            const interruptDiv = document.createElement('div');
+            interruptDiv.className = 'interrupt-panel';
+            interruptDiv.id = 'interrupt-panel';
+
+            const title = document.createElement('h3');
+            title.textContent = '⚠️ Implementation Plan - Review Required';
+            interruptDiv.appendChild(title);
+
+            const planDiv = document.createElement('div');
+            planDiv.className = 'interrupt-plan';
+            planDiv.textContent = plan;
+            interruptDiv.appendChild(planDiv);
+
+            const buttonsDiv = document.createElement('div');
+            buttonsDiv.className = 'interrupt-buttons';
+
+            const approveBtn = document.createElement('button');
+            approveBtn.className = 'approve-btn';
+            approveBtn.textContent = '✓ Approve & Continue';
+            approveBtn.onclick = () => handleInterruptDecision('approve');
+            buttonsDiv.appendChild(approveBtn);
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'reject-btn';
+            rejectBtn.textContent = '✗ Reject';
+            rejectBtn.onclick = () => handleInterruptDecision('reject');
+            buttonsDiv.appendChild(rejectBtn);
+
+            interruptDiv.appendChild(buttonsDiv);
+            chatContainer.appendChild(interruptDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            console.log('[INTERRUPT PANEL] Created');
+        }
+
+        function hideInterruptPanel() {
+            const panel = document.getElementById('interrupt-panel');
+            if (panel) {
+                panel.remove();
+            }
+        }
+
+        function showProgress(nodeName, action) {
+            console.log('[showProgress CALLED]', nodeName, action);
+            let panel = document.getElementById('progress-panel');
+            console.log('[EXISTING PANEL]', panel);
+
+            // Create panel if doesn't exist
+            if (!panel) {
+                console.log('[CREATING NEW PROGRESS PANEL]');
+                const chatContainer = document.getElementById('chatContainer');
+                panel = document.createElement('div');
+                panel.className = 'progress-panel';
+                panel.id = 'progress-panel';
+                chatContainer.appendChild(panel);
+                console.log('[PANEL CREATED]', panel);
+            }
+
+            // Map node names to friendly labels
+            const nodeLabels = {
+                'orchestrator': 'Orchestrator',
+                'coding_planner': 'Coding Planner',
+                'coder': 'Coder',
+                'researcher': 'Researcher',
+                'jira': 'Jira Agent'
+            };
+
+            const actionLabels = {
+                'orchestrator': 'Analyzing your request...',
+                'coding_planner': 'Creating implementation plan...',
+                'coder': 'Writing code...',
+                'researcher': 'Researching information...',
+                'jira': 'Managing Jira tasks...'
+            };
+
+            const label = nodeLabels[nodeName] || nodeName;
+            const actionText = actionLabels[nodeName] || action || 'Processing...';
+
+            // Track steps
+            if (!progressSteps.includes(nodeName)) {
+                progressSteps.push(nodeName);
+            }
+
+            // Build content
+            panel.innerHTML = `
+                <div class="progress-spinner"></div>
+                <div style="flex: 1;">
+                    <div class="progress-text">
+                        <strong>${label}</strong>: ${actionText}
+                    </div>
+                    <div class="progress-steps">
+                        ${progressSteps.map(step => {
+                            const stepLabel = nodeLabels[step] || step;
+                            const isActive = step === nodeName;
+                            const isCompleted = progressSteps.indexOf(step) < progressSteps.indexOf(nodeName);
+                            const className = isActive ? 'active' : (isCompleted ? 'completed' : '');
+                            return `<span class="progress-step ${className}">${stepLabel}</span>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            // Debug: verify panel is visible
+            setTimeout(() => {
+                const checkPanel = document.getElementById('progress-panel');
+                if (checkPanel) {
+                    console.log('[PROGRESS PANEL DEBUG]', {
+                        exists: !!checkPanel,
+                        display: getComputedStyle(checkPanel).display,
+                        visibility: getComputedStyle(checkPanel).visibility,
+                        height: getComputedStyle(checkPanel).height,
+                        width: getComputedStyle(checkPanel).width,
+                        position: checkPanel.getBoundingClientRect(),
+                        innerHTML: checkPanel.innerHTML.substring(0, 100)
+                    });
+                }
+            }, 100);
+        }
+
+        function updateProgressToPaused() {
+            const panel = document.getElementById('progress-panel');
+            if (!panel) return;
+
+            // Change to paused state
+            panel.innerHTML = `
+                <div style="width: 20px; height: 20px; border: 3px solid #ffc107; border-radius: 50%;"></div>
+                <div style="flex: 1;">
+                    <div class="progress-text" style="color: #856404;">
+                        <strong>⏸️ Paused</strong>: Waiting for your approval
+                    </div>
+                    <div class="progress-steps">
+                        ${progressSteps.map(step => {
+                            const nodeLabels = {
+                                'orchestrator': 'Orchestrator',
+                                'coding_planner': 'Coding Planner',
+                                'coder': 'Coder',
+                                'researcher': 'Researcher'
+                            };
+                            const stepLabel = nodeLabels[step] || step;
+                            return `<span class="progress-step completed">${stepLabel}</span>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function hideProgress() {
+            const panel = document.getElementById('progress-panel');
+            if (panel) {
+                panel.remove();
+            }
+            progressSteps = [];
+        }
+
+        async function handleInterruptDecision(decision) {
+            hideInterruptPanel();
+            hideProgress(); // Clear old progress
+            progressSteps = []; // Reset steps
+            showTyping();
+
+            try {
+                const apiUrl = getApiUrl();
+                const tid = getThreadId();
+                const assistantId = getAssistantId();
+
+                console.log('[RESUME]', 'Decision:', decision, 'Thread:', tid);
+
+                // Try different resume formats
+                const requestBody = {
+                    assistant_id: assistantId,
+                    stream_mode: ['messages', 'updates', 'values'],
+                    command: {
+                        resume: {
+                            decisions: [{ type: decision }]
+                        }
+                    }
+                };
+
+                console.log('[RESUME REQUEST]', JSON.stringify(requestBody, null, 2));
+
+                const response = await fetch(`${apiUrl}/threads/${tid}/runs/stream`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                console.log('[RESUME RESPONSE]', response.status, response.statusText);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.log('[RESUME ERROR]', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                hideTyping();
+                await processStream(response);
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError(`Error handling decision: ${error.message}`);
+            } finally {
+                isProcessing = false;
+                document.getElementById('sendButton').disabled = false;
+            }
+        }
+
+        async function processStream(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let currentEvent = null;
+            let interruptFound = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.trim()) {
+                        currentEvent = null;
+                        continue;
+                    }
+
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.slice(7).trim();
+                        console.log('[EVENT]', currentEvent);
+                    } else if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            console.log('[DATA]', currentEvent, data);
+
+                            // Show progress based on updates event
+                            if (currentEvent === 'updates') {
+                                console.log('[UPDATES EVENT DETECTED]', data);
+                                // Check which node is updating
+                                const nodeKeys = Object.keys(data).filter(k => !k.startsWith('__'));
+                                console.log('[NODE KEYS]', nodeKeys);
+                                if (nodeKeys.length > 0) {
+                                    const nodeName = nodeKeys[0];
+                                    console.log('[NODE ACTIVE]', nodeName);
+                                    console.log('[CALLING showProgress]', nodeName);
+                                    showProgress(nodeName);
+                                } else {
+                                    console.log('[NO NODE KEYS FOUND]');
+                                }
+                            }
+
+                            // Check for interrupt in updates or values events
+                            if ((currentEvent === 'updates' || currentEvent === 'values') && data.__interrupt__) {
+                                console.log('[INTERRUPT IN STREAM]', data.__interrupt__);
+                                interruptFound = true;
+                                // Don't hide progress - keep showing which agents were called
+                                await processInterruptFromData(data.__interrupt__);
+                            }
+
+                            // Handle all message events
+                            if (currentEvent && currentEvent.includes('messages')) {
+                                console.log('[MESSAGES EVENT]', currentEvent, data);
+                                const msgs = Array.isArray(data) ? data : [data];
+                                for (const msg of msgs) {
+                                    console.log('[MSG]', msg);
+                                    if (msg.type === 'ai' && msg.content) {
+                                        console.log('[ADDING MESSAGE]', msg.content);
+                                        addMessage('assistant', msg.content);
+                                    }
+                                }
+                            }
+
+                            // Also check updates event for messages
+                            if (currentEvent === 'updates' && data.messages) {
+                                console.log('[UPDATES MESSAGES]', data.messages);
+                                for (const msg of data.messages) {
+                                    if (msg.type === 'ai' && msg.content) {
+                                        addMessage('assistant', msg.content);
+                                    }
+                                }
+                            }
+
+                            // Check values event for full state including messages
+                            if (currentEvent === 'values' && data.messages) {
+                                console.log('[VALUES MESSAGES]', data.messages);
+                                const msgs = Array.isArray(data.messages) ? data.messages : [data.messages];
+                                // Get only the last AI message from values to avoid duplicates
+                                const lastAiMsg = msgs.filter(m => m.type === 'ai').pop();
+                                if (lastAiMsg && lastAiMsg.content) {
+                                    console.log('[ADDING VALUES MESSAGE]', lastAiMsg.content);
+                                    addMessage('assistant', lastAiMsg.content);
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e, line);
+                        }
+                    }
+                }
+            }
+
+            console.log('[STREAM ENDED] Interrupt found:', interruptFound);
+
+            // If no interrupt found in stream, try checking state
+            if (!interruptFound) {
+                console.log('[NO INTERRUPT IN STREAM] Checking state...');
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await checkForInterrupts();
+                // Hide progress if no interrupt
+                hideProgress();
+            }
+        }
+
+        async function processInterruptFromData(interruptData) {
+            console.log('[PROCESSING INTERRUPT]', interruptData);
+
+            if (!interruptData || interruptData.length === 0) {
+                console.log('[EMPTY INTERRUPT DATA]');
+                return;
+            }
+
+            // Update progress to show paused state
+            updateProgressToPaused();
+
+            const interrupt = interruptData[0];
+            console.log('[INTERRUPT]', interrupt);
+
+            // Extract plan from interrupt
+            let plan = null;
+
+            // Try different interrupt structures
+            if (interrupt.value && interrupt.value.action_requests) {
+                const actionRequest = interrupt.value.action_requests[0];
+                console.log('[ACTION REQUEST]', actionRequest);
+                if (actionRequest && actionRequest.args && actionRequest.args.task) {
+                    plan = actionRequest.args.task;
+                }
+            } else if (interrupt.action_requests) {
+                const actionRequest = interrupt.action_requests[0];
+                if (actionRequest && actionRequest.args && actionRequest.args.task) {
+                    plan = actionRequest.args.task;
+                }
+            }
+
+            if (plan) {
+                console.log('[PLAN FOUND]', plan);
+                showInterruptPanel(plan);
+                currentInterrupt = interrupt;
+            } else {
+                console.log('[NO PLAN IN INTERRUPT]', interrupt);
+            }
+        }
+
+        async function checkForInterrupts() {
+            try {
+                const apiUrl = getApiUrl();
+                const tid = getThreadId();
+                const assistantId = getAssistantId();
+
+                console.log('[CHECKING INTERRUPTS] Thread:', tid);
+
+                // Get current thread state - use checkpoint endpoint
+                const stateResponse = await fetch(`${apiUrl}/threads/${tid}/state/checkpoint`);
+                if (!stateResponse.ok) {
+                    console.log('[STATE ERROR]', stateResponse.status, 'trying alternate endpoint');
+
+                    // Try alternate endpoint
+                    const altResponse = await fetch(`${apiUrl}/threads/${tid}/state`);
+                    if (!altResponse.ok) {
+                        console.log('[ALT STATE ERROR]', altResponse.status);
+                        return;
+                    }
+                    const altState = await altResponse.json();
+                    console.log('[ALT STATE]', JSON.stringify(altState, null, 2));
+                    await processInterruptFromState(altState);
+                    return;
+                }
+
+                const state = await stateResponse.json();
+                console.log('[STATE]', JSON.stringify(state, null, 2));
+                await processInterruptFromState(state);
+
+            } catch (e) {
+                console.error('Error checking interrupts:', e);
+            }
+        }
+
+        async function processInterruptFromState(state) {
+            // Try multiple paths for interrupt
+            let interruptData = null;
+
+            // Path 1: state.values.__interrupt__
+            if (state.values && state.values.__interrupt__) {
+                console.log('[INTERRUPT PATH 1]', state.values.__interrupt__);
+                interruptData = state.values.__interrupt__;
+            }
+            // Path 2: state.__interrupt__
+            else if (state.__interrupt__) {
+                console.log('[INTERRUPT PATH 2]', state.__interrupt__);
+                interruptData = state.__interrupt__;
+            }
+            // Path 3: state.tasks (alternative structure)
+            else if (state.tasks && state.tasks.length > 0) {
+                console.log('[TASKS]', state.tasks);
+                const task = state.tasks.find(t => t.interrupts && t.interrupts.length > 0);
+                if (task) {
+                    console.log('[INTERRUPT PATH 3]', task.interrupts);
+                    interruptData = task.interrupts;
+                }
+            }
+
+            if (!interruptData || interruptData.length === 0) {
+                console.log('[NO INTERRUPT]');
+                return;
+            }
+
+            const interrupt = interruptData[0];
+            console.log('[INTERRUPT]', interrupt);
+
+            // Extract plan from interrupt
+            let plan = null;
+
+            // Try different interrupt structures
+            if (interrupt.value && interrupt.value.action_requests) {
+                const actionRequest = interrupt.value.action_requests[0];
+                console.log('[ACTION REQUEST]', actionRequest);
+                if (actionRequest && actionRequest.args && actionRequest.args.task) {
+                    plan = actionRequest.args.task;
+                }
+            } else if (interrupt.action_requests) {
+                const actionRequest = interrupt.action_requests[0];
+                if (actionRequest && actionRequest.args && actionRequest.args.task) {
+                    plan = actionRequest.args.task;
+                }
+            }
+
+            if (plan) {
+                console.log('[PLAN]', plan);
+                showInterruptPanel(plan);
+                currentInterrupt = interrupt;
+            } else {
+                console.log('[NO PLAN FOUND IN INTERRUPT]');
+            }
+        }
+
         async function ensureThread(apiUrl, tid) {
             // Check if thread exists, create if not
             try {
@@ -467,6 +1052,10 @@
             isProcessing = true;
             document.getElementById('sendButton').disabled = true;
 
+            // Clear any existing progress/interrupt panels
+            hideProgress();
+            hideInterruptPanel();
+
             addMessage('user', message);
             input.value = '';
             showTyping();
@@ -494,7 +1083,7 @@
                                 }
                             ]
                         },
-                        stream_mode: 'messages'
+                        stream_mode: ['messages', 'updates', 'values']
                     })
                 });
 
@@ -504,49 +1093,7 @@
                 }
 
                 hideTyping();
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let currentEvent = null;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop();
-
-                    for (const line of lines) {
-                        if (!line.trim()) {
-                            currentEvent = null;
-                            continue;
-                        }
-
-                        if (line.startsWith('event: ')) {
-                            currentEvent = line.slice(7).trim();
-                        } else if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-
-                                // Handle messages/complete or messages/partial events
-                                if (currentEvent === 'messages/complete' || currentEvent === 'messages/partial') {
-                                    const msgs = Array.isArray(data) ? data : [data];
-                                    for (const msg of msgs) {
-                                        if (msg.type === 'ai' && msg.content) {
-                                            addMessage('assistant', msg.content);
-                                        }
-                                    }
-                                }
-                            } catch (e) {
-                                console.error('Parse error:', e, line);
-                            }
-                        }
-                    }
-                }
-
-                // Messages are added during streaming, no need to add here
+                await processStream(response);
 
             } catch (error) {
                 console.error('Error:', error);

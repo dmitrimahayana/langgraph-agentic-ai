@@ -329,29 +329,29 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
         "results": [{"source": "jira", "result": str(result["messages"][-1].content)}]
     }
 
-async def evaluator(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-    file_path = os.path.join(base_dir, "souls", "evaluator", "SOUL.md")
-    soul = await read_md_file(file_path)
+# async def evaluator(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+#     file_path = os.path.join(base_dir, "souls", "evaluator", "SOUL.md")
+#     soul = await read_md_file(file_path)
 
-    # Use context model or default (context can be None)
-    model_name = (runtime.context or {}).get("evaluator", DEFAULT_MODEL)
-    model = ModelAgent(model_name=model_name).load_model()
+#     # Use context model or default (context can be None)
+#     model_name = (runtime.context or {}).get("evaluator", DEFAULT_MODEL)
+#     model = ModelAgent(model_name=model_name).load_model()
 
-    agent = create_agent(
-        model=model,
-        system_prompt=soul
-    )
-    # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": state["messages"]})
+#     agent = create_agent(
+#         model=model,
+#         system_prompt=soul
+#     )
+#     # Invoke with conversation context - agent will see full message history
+#     result = await agent.ainvoke({"messages": state["messages"]})
 
-    # Return results with source tracking
-    return {"check_progress": result["messages"][-1].content}
+#     # Return results with source tracking
+#     return {"check_progress": result["messages"][-1].content}
 
-def progress_router(state: RouterState):
-    if state["check_progress"] == "NEXT_STEP":
-        return "NEXT"
-    elif state["check_progress"] == "END":
-        return "END"
+# def progress_router(state: RouterState):
+#     if state["check_progress"] == "NEXT_STEP":
+#         return "NEXT"
+#     elif state["check_progress"] == "END":
+#         return "END"
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
