@@ -16,9 +16,9 @@ user_input=None
 
 while True:
     if "__interrupt__" not in result and "interrupts" not in result:
-        # user_input = input("\nUser: ")
-        language_programming = ["Python", "JavaScript", "Java", "C++", "C#", "Ruby", "Go", "Swift", "Kotlin", "PHP", "TypeScript", "Rust", "Scala", "Perl", "Haskell", "Lua", "Objective-C", "R", "Dart", "Elixir"]
-        user_input = f"write a quick sort in {random.choice(language_programming)} and name it test_sort"
+        user_input = input("\nUser: ")
+        # language_programming = ["Python", "JavaScript", "Java", "C++", "C#", "Ruby", "Go", "Swift", "Kotlin", "PHP", "TypeScript", "Rust", "Scala", "Perl", "Haskell", "Lua", "Objective-C", "R", "Dart", "Elixir"]
+        # user_input = f"write a quick sort in {random.choice(language_programming)} and name it test_sort"
         print(f"\nHuman: {user_input}")
         if user_input.lower() in ["exit", "quit", "q"]:
             print("Ending conversation.")
@@ -46,6 +46,7 @@ while True:
                     config=config, # Same thread ID to resume the paused conversation
                     version="v2",
                 ) )
+                print(f"\nAssistant: {result['messages'][-1].content}")
             case "n":
                 result = asyncio.run(graph.ainvoke(
                     Command(
@@ -63,11 +64,13 @@ while True:
                     config=config, # Same thread ID to resume the paused conversation
                     version="v2",
                 ) )
-        print(f"\nAssistant: {result['messages'][-1].content}")
+                print(f"\nAssistant: {result['messages'][-1].content}")
+        
 
     else:
         result = asyncio.run(graph.ainvoke(
         {"messages": [{"role": "user", "content": user_input}]},
         config=config,
         ))
-        print(f"\nAssistant: {result['messages'][-1].content}")
+        if not result.get("interrupts", None):
+            print(f"\nAssistant: {result['messages'][-1].content}")

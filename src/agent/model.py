@@ -30,7 +30,8 @@ class ModelAgent:
 
             return ChatOllama(
                 model=new_model_name,
-                base_url=base_url
+                base_url=base_url,
+                temperature=0.7
             )
         else:
             raise ValueError("Unsupported model name")
