@@ -5,6 +5,7 @@ from langchain.tools import tool, ToolRuntime
 from langgraph.runtime import Runtime
 from typing_extensions import TypedDict
 from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.agent_toolkits.jira.toolkit import JiraToolkit
 from langchain_community.utilities.jira import JiraAPIWrapper
@@ -15,7 +16,7 @@ from deepagents.backends import StateBackend, FilesystemBackend, LocalShellBacke
 from langchain.agents.middleware import HumanInTheLoopMiddleware 
 from deepagents import create_deep_agent
 from agent.model import ModelAgent
-from langchain.messages import AnyMessage, HumanMessage, ToolMessage
+from langchain.messages import AnyMessage, HumanMessage, ToolMessage, AIMessage
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 from langsmith.sandbox import SandboxClient
@@ -71,20 +72,20 @@ def get_search_tool():
 #         _jira_toolkit = JiraToolkit.from_jira_api_wrapper(jira_api)
 #     return _jira_toolkit
 
-# config = {
-#         "mcpServers": {
-#             "playwright": {
-#                 "command": "npx",
-#                 "args": [
-#                     "-y",
-#                     "@playwright/mcp@latest",
-#                     "--cdp-endpoint",
-#                     "http://localhost:9222"
-#                 ],
-#             }
-#     }
-# }
-# browser_test = MCPAdapter(config)
+config = {
+        "mcpServers": {
+            "playwright": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@playwright/mcp@latest",
+                    "--cdp-endpoint",
+                    "http://localhost:9222"
+                ],
+            }
+    }
+}
+browser_test = MCPAdapter(config)
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -100,17 +101,22 @@ class Context(TypedDict, total=False):
     researcher_model: str
     coder_model: str
 
-class AgentOutput(TypedDict):
-    """Output from each subagent."""
-    source: str
-    result: str
-
 class RouterState(MessagesState):
     """State that maintains conversation history via messages."""
-    specialist_messages: Annotated[list[AnyMessage], add_messages]
-    check_progress: str
-    results: Annotated[list[AgentOutput], operator.add]  # Reducer collects parallel results
+    researcher_messages: Annotated[list[AnyMessage], add_messages]
+    orchestrator_messages: Annotated[list[AnyMessage], add_messages]
+    coder_messages: Annotated[list[AnyMessage], add_messages]
+    jira_messages: Annotated[list[AnyMessage], add_messages]
+    task_list: list = []
+    current_task: str = ""
+    check_progress: str = ""
 
+class PlanStep(BaseModel):
+    task: str
+    expected_output: str
+
+class ListPlanStep(BaseModel):
+    plan: list[PlanStep]
 
 # File system tools
 @tool
@@ -132,23 +138,6 @@ def write_file(file_path: str, content: str) -> str:
         return f"Successfully wrote to {file_path}"
     except Exception as e:
         return f"Error writing to {file_path}: {str(e)}"
-
-# Agent wrap tool
-
-# @tool
-# def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
-#     """Delegate coding and filesystem tasks to the coder agent.
-#     Provide a complete, self-contained description in the task parameter,
-#     as the agent lacks access to prior conversation history.
-#     """
-#     return Command(
-#         goto="coding_planner",
-#         update={"messages": [ToolMessage(
-#             content=f"Handed off to coding planner with task: {task}",
-#             tool_call_id=runtime.tool_call_id,
-#         )]},
-#         graph=Command.PARENT,
-#     )
     
 @tool
 def ask_user(prompt: str) -> str:
@@ -159,16 +148,24 @@ def ask_user(prompt: str) -> str:
 
 @tool
 def handoff_to_coder(task: str, runtime: ToolRuntime) -> Command:
-    """Hand off to coder agent with implementation task.
+    """Handle filesystem, writing code, reading code, open a file, list directory.
     Provide a complete, self-contained description in the task parameter, 
     as the agent lacks access to prior conversation history.
     """
     return Command(
         goto="coder",
-        update={"specialist_messages": [ToolMessage(
-            content=f"Handed off to coder with task: {task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
+        update={"coder_messages": [HumanMessage(f"Handed off to coder with task: {task}")]},
+        graph=Command.PARENT,
+    )
+@tool
+def ask_computer_agent(question: str, runtime: ToolRuntime) -> Command:
+    """Ask Agent about current folder location, list directory, list of all file, open and read a file.
+    Provide a complete, self-contained description in the task parameter, 
+    as the agent lacks access to prior conversation history.
+    """
+    return Command(
+        goto="think_coder",
+        update={"coder_messages": [HumanMessage(f"question: {question}")]},
         graph=Command.PARENT,
     )
 
@@ -180,110 +177,167 @@ def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
     """
     return Command(
         goto="jira",
-        update={"specialist_messages": [ToolMessage(
-            content=f"Handed off to jira with task: {task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
+        update={"jira_messages": [HumanMessage(f"Handed off to jira with task: {task}")]},
         graph=Command.PARENT,
     )
 
 @tool
-async def handoff_to_planner(output_task: str, runtime: ToolRuntime) -> Command:
-    """Delegate planning and evaluating task to planning agent.
-    this agent would plan and evaluate your work result
-    Provide a complete, self-contained description in the output_task parameter.
+def ask_jira_agent(question: str, runtime: ToolRuntime) -> Command:
+    """Ask jira agent about ticket describtion, ticket status and tickte subtask.
+    Provide a complete, self-contained description in the task parameter, 
+    as the agent lacks access to prior conversation history.
     """
-    result = Command(
-        goto="planner",
-        update={"messages": [ToolMessage(
-            content=f"Handed off to planner_agent with task: {output_task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
+    return Command(
+        goto="think_jira",
+        update={"jira_messages": [HumanMessage(f"question: {question}")]},
         graph=Command.PARENT,
     )
-    return result
 
 @tool
 async def handoff_to_researcher_agent(task: str, runtime: ToolRuntime) -> Command:
-    """Delegate internet research and reference tasks to the researcher agent.
+    """Handle internet research and reference search tasks.
     Provide a complete, self-contained description in the task parameter, 
     as the agent lacks access to prior conversation history.
     """
     result = Command(
         goto="researcher",
-        update={"messages": [ToolMessage(
-            content=f"Handed off to researcher_agent with task: {task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
+        update={"researcher_messages": [HumanMessage(f"Handed off to researcher_agent with task: {task}")]},
         graph=Command.PARENT,
     )
     return result
 
 @tool
-async def handoff_to_orchestrator_agent(plan: str, runtime: ToolRuntime) -> Command:
-    """Delegate plan for execution to the orchestrator agent.
+async def report_issue_to_planner_agent(issue: str, runtime: ToolRuntime) -> Command:
+    """Immedietly tell agent planner about current issue happening.
     Provide a complete, self-contained description in the plan parameter, 
     as the agent lacks access to prior conversation history.
     """
     result = Command(
-        goto="orchestrator",
-        update={"messages": [ToolMessage(
-            content=f"Handed off to orchestrator_agent with plan: {plan}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
+        goto="planner",
+        update={"messages":[AIMessage(f"Report issue from orchestrator with issue: {issue}")]},
         graph=Command.PARENT,
     )
     return result
 
-async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+@tool
+async def handoff_to_orchestrator_planner_agent(plan: str, runtime: ToolRuntime) -> Command:
+    """Delegate the complete plan to the orchestrator agent.
+    Provide a complete, self-contained description in the plan parameter, 
+    as the agent lacks access to prior conversation history.
+    """
+    result = Command(
+        goto="planner_generator",
+        update={},
+        graph=Command.PARENT,
+    )
+    return result
+
+
+async def create_plan_agent(state: RouterState, runtime: Runtime[Context]):
+    # devide thingking and planning process
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("planner_gen_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+    planner = create_agent(
+    model=model,
+    system_prompt=""""generate step by step task plan. 
+    Provide a complete, self-contained description of each plan, 
+    as the other agent lacks access to prior conversation history""",
+    response_format=ToolStrategy(
+        schema=ListPlanStep,
+        handle_errors=True # Catch validation errors and pass them back to the model for correction
+    )   
+    )
+    planner_result = await planner.ainvoke({"messages": state["messages"]})
+    print(planner_result["structured_response"])
+    if planner_result.get("structured_response"):
+        return Command(
+            goto="orchestrator",
+            update={
+                "task_list": planner_result.get("structured_response").plan,
+            }
+        )
+    else:
+        return Command(
+            goto="planner",
+            update={
+                "messages": state["messages"],
+            }
+        )
+
+
+async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]):
     file_path = os.path.join(base_dir, "souls", "orchestrator", "SOUL.md")
     soul = await read_md_file(file_path)
-
-    # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("orchestrator_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    last_msg = state["messages"][-1]
-    human_msg = HumanMessage(content=last_msg.content)
-    full_state =  [human_msg] + state["specialist_messages"]
-    
-    agent = create_deep_agent(
-        model=model,
-        tools=[
-            handoff_to_coder,
-            handoff_to_jira_agent
-            ],
-        system_prompt=soul,
-    )
-    result = await agent.ainvoke({"messages": full_state})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
-    return Command(
-        goto="planner",
-        update={"messages": result["messages"]}
-    )
+    if len(state.get("task_list", [])) > 0:
+        next_task = state["task_list"].pop(0)
+        # Use context model or default (context can be None)
+        
+        planstep = f"task :{next_task.task} \n expected output:{next_task.expected_output}"
+        task = [state['messages'][-1]] + [HumanMessage(planstep)] + state['orchestrator_messages']
+        
+        agent = create_deep_agent(
+            model=model,
+            tools=[
+                handoff_to_coder,
+                handoff_to_jira_agent,
+                handoff_to_researcher_agent,
+                report_issue_to_planner_agent,
+                ],
+            system_prompt=soul,
+        )
+        result = await agent.ainvoke({"messages": task})
+
+        if len(state.get("task_list", [])) > 0:
+            return Command(
+                goto="orchestrator",
+                update={
+                    "orchestrator_messages": result["messages"]
+            })
+        return Command(
+            goto="planner",
+            update={
+                "messages": result["messages"][-1],
+                "orchestrator_messages": result["messages"]
+            }
+        )
+    else:
+        agent = create_agent(
+            model=model,
+            system_prompt="sorry it seem there an error at planning step",
+        )
+        result = await agent.ainvoke({"messages": [{"role": "user", "content": "error plan step is not found"}]})
+        return Command(
+            goto="planner",
+            update={"orchestrator_messages": result["messages"][-1], "messages": result["messages"][-1]}
+        )
 
 async def planner_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     file_path = os.path.join(base_dir, "souls", "planner", "SOUL.md")
     soul = await read_md_file(file_path)
-
+    # devide thingking and planning process
     # Use context model or default (context can be None)
-    model_name = (runtime.context or {}).get("orchestrator_model", DEFAULT_MODEL)
+    model_name = (runtime.context or {}).get("planner_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    agent = create_agent(
+    thinking = create_agent(
         model=model,
         tools=[
             handoff_to_researcher_agent,
-            handoff_to_orchestrator_agent
+            handoff_to_orchestrator_planner_agent,
+            ask_jira_agent,
+            ask_computer_agent
         ],
-        system_prompt=soul
+        system_prompt=soul,
     )
-    result = await agent.ainvoke({"messages": state["messages"]})
+    thinking_result = await thinking.ainvoke({"messages": state["messages"]})
     return Command(
         goto="bridge",
-        update={"messages": result["messages"]}
+        update={
+            "messages": thinking_result["messages"],
+        }
     )
-
 
 async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     file_path = os.path.join(base_dir, "souls", "researcher", "SOUL.md")
@@ -292,32 +346,30 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("researcher_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    # tools = await browser_test.list_tools()
+    tools = await browser_test.list_tools()
+    # tools = [search_tool]
 
-    agent = create_deep_agent(
+    agent = create_agent(
         model=model,
-        tools=[get_search_tool()],
+        tools=tools,
         system_prompt=soul,
     )
     last_msg = state["messages"][-1]
     # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": [{"role": "user", "content": last_msg.content}]})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
+    result = await agent.ainvoke({"messages": state["researcher_messages"]})
     # Return results with source tracking
     return Command(
         goto="planner",
         update={
-        "messages": result["messages"],
-        "results": [{"source": "researcher", "result": str(result["messages"][-1].content)}]
+        "researcher_messages": result["messages"],
+        "messages": result["messages"][-1]
         }
     )
 
 async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_dir, "souls", "coder", "SOUL.md")
-    soul = await read_md_file(file_path) + f"\n #### current folder location is :{WORKDIR}"
+    soul = await read_md_file(file_path) + f"\n ###### The Current Folder Location is :{WORKDIR}"
 
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
@@ -327,29 +379,44 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
         model=model,
         system_prompt=soul,
         backend=backend_fl,
-        # middleware=[
-        #     HumanInTheLoopMiddleware(
-        #         interrupt_on={
-        #             "execute": {
-        #                 "allowed_decisions": ["approve", "respond", "reject"]
-        #             },
-        #         },
-        #         description_prefix="review shell execution before running it",
-        #     ),
-        # ],
     )
-    last_msg = state["specialist_messages"][-1]
-    human_msg = HumanMessage(content=last_msg.content)
     # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": [human_msg]})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
+    result = await agent.ainvoke({"messages": state.get("coder_messages",[])})
+    # result["messages"] = [
+    #     m for m in result["messages"] if not isinstance(m, HumanMessage)
+    # ]
     # Return results with source tracking
     return Command(
         goto="orchestrator",
         update={
-        "specialist_messages": result["messages"]
+        "orchestrator_messages": result["messages"][-1],
+        "coder_messages": result["messages"],
+        "current_task": None
+        }
+    )
+
+async def think_coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, "souls", "coder", "SOUL.md")
+    soul = await read_md_file(file_path) + f"\n ###### The Current Folder Location is :{WORKDIR}"
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+
+    agent = create_deep_agent(
+        model=model,
+        system_prompt=soul,
+        backend=backend_fl,
+    )
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": state.get("coder_messages",[])})
+    # Return results with source tracking
+    return Command(
+        goto="planner",
+        update={
+        "messages": result["messages"][-1],
+        "coder_messages": result["messages"]
         }
     )
 
@@ -360,23 +427,44 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("jira_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    tools = jira_toolkit.get_tools()
     agent = create_deep_agent(
         model=model,
         tools=jira_tools,
         system_prompt=soul,
     )
-    last_msg = state["specialist_messages"][-1]
-    human_msg = HumanMessage(content=last_msg.content)
     # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": [human_msg]})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
+    result = await agent.ainvoke({"messages": state.get("jira_messages",[])})
+    # result["messages"] = [
+    #     m for m in result["messages"] if not isinstance(m, HumanMessage)
+    # ]
     return Command(
         goto="orchestrator",
         update={
-        "specialist_messages": result["messages"]
+        "orchestrator_messages": result["messages"][-1],
+        "jira_messages": result["messages"],
+        "current_task": None
+        }
+    )
+
+async def think_jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    file_path = os.path.join(base_dir, "souls", "jira", "SOUL.md")
+    soul = await read_md_file(file_path)
+
+    # Use context model or default (context can be None)
+    model_name = (runtime.context or {}).get("jira_model", DEFAULT_MODEL)
+    model = ModelAgent(model_name=model_name).load_model()
+    agent = create_deep_agent(
+        model=model,
+        tools=jira_tools,
+        system_prompt=soul,
+    )
+    # Invoke with conversation context - agent will see full message history
+    result = await agent.ainvoke({"messages": state.get("jira_messages",[])})
+    return Command(
+        goto="planner",
+        update={
+        "jira_messages": result["messages"],
+        "messages": result["messages"][-1]
         }
     )
 
@@ -385,16 +473,15 @@ def bridge(state: RouterState):
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
+builder.add_node("planner_generator", create_plan_agent)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
 builder.add_node("planner", planner_agent)
 builder.add_node("bridge", bridge)
-# builder.add_node("coding_planner", coding_planner_agent)
 builder.add_node("coder", coder_agent)
+builder.add_node("think_coder", think_coder_agent)
 builder.add_node("jira", jira_agent)
-# builder.add_node("evaluator", evaluator)
-# builder.add_node("classifier", classify_query)
-# builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
+builder.add_node("think_jira", think_jira_agent)
 
 
 # Start with orchestrator

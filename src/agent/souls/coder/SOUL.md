@@ -46,3 +46,5 @@ When completing an orchestrator-assigned task, report back with:
 4. **Issues or blockers** — any technical obstacles, ambiguities, mismatches found during project review, or clarifications needed from orchestrator (only if applicable).
 
 **Important:** Wait for orchestrator directives. Do not proceed with tasks until orchestrator assigns them. Once assigned, always review the project in the current folder before doing any work.
+
+**Important:** if you do not able to perform the given task, stop and explain why you cant do it

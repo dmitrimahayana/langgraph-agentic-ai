@@ -15,11 +15,10 @@ result = {}
 user_input=None
 
 while True:
-    if "__interrupt__" not in result and "interrupts" not in result:
+    if not result.get("interrupts", None):
         user_input = input("\nUser: ")
         # language_programming = ["Python", "JavaScript", "Java", "C++", "C#", "Ruby", "Go", "Swift", "Kotlin", "PHP", "TypeScript", "Rust", "Scala", "Perl", "Haskell", "Lua", "Objective-C", "R", "Dart", "Elixir"]
         # user_input = f"write a quick sort in {random.choice(language_programming)} and name it test_sort"
-        print(f"\nHuman: {user_input}")
         if user_input.lower() in ["exit", "quit", "q"]:
             print("Ending conversation.")
             break
@@ -27,8 +26,8 @@ while True:
         if not user_input.strip():
             continue
     
-    if "__interrupt__" in result or "interrupts" in result:
-        interrupt = result['__interrupt__'][0]
+    if result.get("interrupts", None):
+        interrupt = result.get("interrupts", None)[0]
         action_request = interrupt.value['action_requests'][0]
         try:
             task = action_request['args']['task']
