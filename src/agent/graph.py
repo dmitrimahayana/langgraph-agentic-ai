@@ -72,20 +72,20 @@ def get_search_tool():
 #         _jira_toolkit = JiraToolkit.from_jira_api_wrapper(jira_api)
 #     return _jira_toolkit
 
-config = {
-        "mcpServers": {
-            "playwright": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@playwright/mcp@latest",
-                    "--cdp-endpoint",
-                    "http://localhost:9222"
-                ],
-            }
-    }
-}
-browser_test = MCPAdapter(config)
+# config = {
+#         "mcpServers": {
+#             "playwright": {
+#                 "command": "npx",
+#                 "args": [
+#                     "-y",
+#                     "@playwright/mcp@latest",
+#                     "--cdp-endpoint",
+#                     "http://localhost:9222"
+#                 ],
+#             }
+#     }
+# }
+# browser_test = MCPAdapter(config)
 
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -346,12 +346,12 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("researcher_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
-    tools = await browser_test.list_tools()
+    # tools = await browser_test.list_tools()
     # tools = [search_tool]
 
     agent = create_agent(
         model=model,
-        tools=tools,
+        tools=[get_search_tool()],
         system_prompt=soul,
     )
     last_msg = state["messages"][-1]
