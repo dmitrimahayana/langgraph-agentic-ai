@@ -169,34 +169,6 @@ def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
         graph=Command.PARENT,
     )
 
-# @tool
-# def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
-#     """Delegate coding and filesystem tasks to the coder agent.
-#     Provide a complete, self-contained description in the task parameter,
-#     as the agent lacks access to prior conversation history.
-#     """
-#     return Command(
-#         goto="coding_planner",
-#         update={"messages": [ToolMessage(
-#             content=f"Handed off to coding planner with task: {task}",
-#             tool_call_id=runtime.tool_call_id,
-#         )]},
-#         graph=Command.PARENT,
-#     )
-
-# @tool
-# def handoff_from_planner_to_coder(task: str, runtime: ToolRuntime) -> Command:
-#     """Hand off from coding planner to coder agent with implementation plan.
-#     Provide the detailed plan and task description.
-#     """
-#     return Command(
-#         goto="coder",
-#         update={"messages": [ToolMessage(
-#             content=f"Handed off to coder from planner: {task}",
-#             tool_call_id=runtime.tool_call_id,
-#         )]},
-#         graph=Command.PARENT,
-#     )
 
 @tool
 def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
@@ -302,42 +274,6 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
         "messages": result["messages"],
         "results": [{"source": "researcher", "result": str(result["messages"][-1].content)}]
     }
-
-
-# async def coding_planner_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-#     file_path = os.path.join(base_dir, "souls", "coding_planner", "SOUL.md")
-#     soul = await read_md_file(file_path)
-
-#     # Use context model or default (context can be None)
-#     model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
-#     model = ModelAgent(model_name=model_name).load_model()
-
-#     agent = create_deep_agent(
-#         model=model,
-#         tools=[handoff_from_planner_to_coder],
-#         system_prompt=soul,
-#         backend=backend,
-#         middleware=[
-#             HumanInTheLoopMiddleware(
-#                 interrupt_on={
-#                     "handoff_from_planner_to_coder": True,  # Review plan before handoff
-#                 },
-#                 description_prefix="Review implementation plan before handoff to coder",
-#             ),
-#         ],
-#     )
-#     last_msg = state["messages"][-1]
-#     human_msg = HumanMessage(content=last_msg.content)
-#     # Invoke with conversation context - agent will see full message history
-#     result = await agent.ainvoke({"messages": [human_msg]})
-#     result["messages"] = [
-#         m for m in result["messages"] if not isinstance(m, HumanMessage)
-#     ]
-#     # Return results with source tracking
-#     return {
-#         "messages": result["messages"],
-#         "results": [{"source": "coding_planner", "result": str(result["messages"][-1].content)}]
-#     }
 
 
 async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
