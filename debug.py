@@ -30,39 +30,39 @@ while True:
         config=config,
     ))
     print(f"\nAssistant: {result['messages'][-1].content}")
-    if "__interrupt__" in result:
-        interrupt = result['__interrupt__'][0]
-        action_request = interrupt.value['action_requests'][0]
-        task = action_request['args']['task']
-        print(f"\nPlan: {task}")
-        user_input = input("Agree?: ")
-        match user_input.lower():
-            case "y":
-                result = asyncio.run(graph.ainvoke(
-                    Command(
-                        resume={"decisions": [{"type": "approve"}]}
-                    ),
-                    config=config, # Same thread ID to resume the paused conversation
-                    version="v2",
-                ) )
-            case "n":
-                result = asyncio.run(graph.ainvoke(
-                    Command(
-                        resume={"decisions": [{"type": "reject"}]} 
-                    ),
-                    config=config, # Same thread ID to resume the paused conversation
-                    version="v2",
-                ) )
-            case _:
-                user_input = input("\nUser Respond: ")
-                result = asyncio.run(graph.ainvoke(
-                    Command(
-                        resume={"decisions": [{"type": "respond", "message": user_input}]} 
-                    ),
-                    config=config, # Same thread ID to resume the paused conversation
-                    version="v2",
-                ) )
+    # if "__interrupt__" in result:
+    #     interrupt = result['__interrupt__'][0]
+    #     action_request = interrupt.value['action_requests'][0]
+    #     task = action_request['args']['task']
+    #     print(f"\nPlan: {task}")
+    #     user_input = input("Agree?: ")
+    #     match user_input.lower():
+    #         case "y":
+    #             result = asyncio.run(graph.ainvoke(
+    #                 Command(
+    #                     resume={"decisions": [{"type": "approve"}]}
+    #                 ),
+    #                 config=config, # Same thread ID to resume the paused conversation
+    #                 version="v2",
+    #             ) )
+    #         case "n":
+    #             result = asyncio.run(graph.ainvoke(
+    #                 Command(
+    #                     resume={"decisions": [{"type": "reject"}]} 
+    #                 ),
+    #                 config=config, # Same thread ID to resume the paused conversation
+    #                 version="v2",
+    #             ) )
+    #         case _:
+    #             user_input = input("\nUser Respond: ")
+    #             result = asyncio.run(graph.ainvoke(
+    #                 Command(
+    #                     resume={"decisions": [{"type": "respond", "message": user_input}]} 
+    #                 ),
+    #                 config=config, # Same thread ID to resume the paused conversation
+    #                 version="v2",
+    #             ) )
 
-        # Print the latest response from the graph
-        latest_message = result["messages"][-1]
-        print(f"\nAssistant: {latest_message.content}")
+    #     # Print the latest response from the graph
+    #     latest_message = result["messages"][-1]
+    #     print(f"\nAssistant: {latest_message.content}")

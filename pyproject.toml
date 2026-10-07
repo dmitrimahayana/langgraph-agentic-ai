@@ -21,6 +21,7 @@ dependencies = [
     "psycopg[binary,pool]>=3.3.5",
     "python-dotenv>=1.0.1",
     "slack-sdk==3.44.1",
+    "typesafe-sdk>=0.7.2",
 ]
 
 

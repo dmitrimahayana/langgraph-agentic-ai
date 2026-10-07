@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from langgraph.types import Command
 from langsmith.sandbox import SandboxClient
 from deepagents.backends import LangSmithSandbox
+from typesafe_sdk import Choice, Noul, Score, AsyncTypeSafeClient
 import operator
 import os
 
@@ -34,11 +35,20 @@ import os
 # once finished. The invoked node can directly alter/update the State. the caller then read the altered State
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
+TYPESAFE_AI_API_KEY = os.environ.get("TYPESAFE_AI_API_KEY", None)
 base_dir = os.path.dirname(os.path.abspath(__file__))
 # client = SandboxClient()  # DEV: disabled to avoid quota
 # ls_sandbox = client.create_sandbox()  # DEV: disabled to avoid quota
 # backend = LangSmithSandbox(sandbox=ls_sandbox) # PROD
 backend = StateBackend() # DEV
+CONFIDENCE_THRESHOLD = 0.6
+Route = Literal["coder", "researcher", "jira", "orchestrator"]
+# Classifier label -> graph node
+AGENT_NODES: dict[str, Route] = {
+    "coder": "coder",
+    "researcher": "researcher",
+    "admin": "jira",
+}
 
 # Lazy initialization for search tool - requires TAVILY_API_KEY env var
 _search_tool = None
@@ -79,8 +89,9 @@ class Progress(BaseModel):
 
 class Classification(TypedDict):
     """A single routing decision: which agent to call with what query."""
-    source: Literal["researcher", "coder"]
+    source: Literal["researcher", "coder", "jira"]
     query: str
+    confidence: float
 
 
 class AgentOutput(TypedDict):
@@ -91,8 +102,11 @@ class AgentOutput(TypedDict):
 
 class RouterState(MessagesState):
     """State that maintains conversation history via messages."""
-    classifications: list[Classification]
+    classifications: Annotated[list[Classification], operator.add]  # Routing history across turns
     check_progress: str
+    agent_name: str
+    agent_confidence: float
+    agent_probability: dict[str, float]
     results: Annotated[list[AgentOutput], operator.add]  # Reducer collects parallel results
 
 
@@ -147,7 +161,7 @@ def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
     as the agent lacks access to prior conversation history.
     """
     return Command(
-        goto="coding_planner",
+        goto="coder",
         update={"messages": [ToolMessage(
             content=f"Handed off to coding planner with task: {task}",
             tool_call_id=runtime.tool_call_id,
@@ -155,19 +169,34 @@ def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
         graph=Command.PARENT,
     )
 
-@tool
-def handoff_from_planner_to_coder(task: str, runtime: ToolRuntime) -> Command:
-    """Hand off from coding planner to coder agent with implementation plan.
-    Provide the detailed plan and task description.
-    """
-    return Command(
-        goto="coder",
-        update={"messages": [ToolMessage(
-            content=f"Handed off to coder from planner: {task}",
-            tool_call_id=runtime.tool_call_id,
-        )]},
-        graph=Command.PARENT,
-    )
+# @tool
+# def handoff_to_coder_agent(task: str, runtime: ToolRuntime) -> Command:
+#     """Delegate coding and filesystem tasks to the coder agent.
+#     Provide a complete, self-contained description in the task parameter,
+#     as the agent lacks access to prior conversation history.
+#     """
+#     return Command(
+#         goto="coding_planner",
+#         update={"messages": [ToolMessage(
+#             content=f"Handed off to coding planner with task: {task}",
+#             tool_call_id=runtime.tool_call_id,
+#         )]},
+#         graph=Command.PARENT,
+#     )
+
+# @tool
+# def handoff_from_planner_to_coder(task: str, runtime: ToolRuntime) -> Command:
+#     """Hand off from coding planner to coder agent with implementation plan.
+#     Provide the detailed plan and task description.
+#     """
+#     return Command(
+#         goto="coder",
+#         update={"messages": [ToolMessage(
+#             content=f"Handed off to coder from planner: {task}",
+#             tool_call_id=runtime.tool_call_id,
+#         )]},
+#         graph=Command.PARENT,
+#     )
 
 @tool
 def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
@@ -188,6 +217,42 @@ def handoff_to_jira_agent(task: str, runtime: ToolRuntime) -> Command:
 async def read_md_file(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+async def classify_query(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+    last_message = state["messages"][-1]
+    typesafe_client = AsyncTypeSafeClient(api_key=TYPESAFE_AI_API_KEY)
+    response = await typesafe_client.system_one(
+        state=last_message.content,
+        questions={
+            "agent_name": Choice(
+                instructions="Which team should handle this",
+                criteria={
+                    "coder": "write, edit, debug or save code and files",
+                    "researcher": "explain, look up, compare or research a topic on the internet",
+                    "admin": "Jira tickets, issues, FAQ, project administration",
+                },
+            ),
+        },
+    )
+    agent_choice = response.answers["agent_name"]
+    return {
+        "classifications": [{
+            "source": AGENT_NODES.get(agent_choice.choice, agent_choice.choice),
+            "query": last_message.content,
+            "confidence": agent_choice.confidence,
+        }],
+        "agent_name": agent_choice.choice,
+        "agent_confidence": agent_choice.confidence,
+        "agent_probability": agent_choice.probabilities,
+    }
+
+
+def route_by_agent(state: RouterState) -> Route:
+    # Unsure -> LLM orchestrator clarifies or decides
+    if state.get("agent_confidence", 0) < CONFIDENCE_THRESHOLD:
+        return "orchestrator"
+    return AGENT_NODES.get(state.get("agent_name", ""), "orchestrator")
 
 
 async def orchestrator_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
@@ -239,40 +304,40 @@ async def researcher_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
     }
 
 
-async def coding_planner_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-    file_path = os.path.join(base_dir, "souls", "coding_planner", "SOUL.md")
-    soul = await read_md_file(file_path)
+# async def coding_planner_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
+#     file_path = os.path.join(base_dir, "souls", "coding_planner", "SOUL.md")
+#     soul = await read_md_file(file_path)
 
-    # Use context model or default (context can be None)
-    model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
-    model = ModelAgent(model_name=model_name).load_model()
+#     # Use context model or default (context can be None)
+#     model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
+#     model = ModelAgent(model_name=model_name).load_model()
 
-    agent = create_deep_agent(
-        model=model,
-        tools=[handoff_from_planner_to_coder],
-        system_prompt=soul,
-        backend=backend,
-        middleware=[
-            HumanInTheLoopMiddleware(
-                interrupt_on={
-                    "handoff_from_planner_to_coder": True,  # Review plan before handoff
-                },
-                description_prefix="Review implementation plan before handoff to coder",
-            ),
-        ],
-    )
-    last_msg = state["messages"][-1]
-    human_msg = HumanMessage(content=last_msg.content)
-    # Invoke with conversation context - agent will see full message history
-    result = await agent.ainvoke({"messages": [human_msg]})
-    result["messages"] = [
-        m for m in result["messages"] if not isinstance(m, HumanMessage)
-    ]
-    # Return results with source tracking
-    return {
-        "messages": result["messages"],
-        "results": [{"source": "coding_planner", "result": str(result["messages"][-1].content)}]
-    }
+#     agent = create_deep_agent(
+#         model=model,
+#         tools=[handoff_from_planner_to_coder],
+#         system_prompt=soul,
+#         backend=backend,
+#         middleware=[
+#             HumanInTheLoopMiddleware(
+#                 interrupt_on={
+#                     "handoff_from_planner_to_coder": True,  # Review plan before handoff
+#                 },
+#                 description_prefix="Review implementation plan before handoff to coder",
+#             ),
+#         ],
+#     )
+#     last_msg = state["messages"][-1]
+#     human_msg = HumanMessage(content=last_msg.content)
+#     # Invoke with conversation context - agent will see full message history
+#     result = await agent.ainvoke({"messages": [human_msg]})
+#     result["messages"] = [
+#         m for m in result["messages"] if not isinstance(m, HumanMessage)
+#     ]
+#     # Return results with source tracking
+#     return {
+#         "messages": result["messages"],
+#         "results": [{"source": "coding_planner", "result": str(result["messages"][-1].content)}]
+#     }
 
 
 async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
@@ -329,57 +394,26 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
         "results": [{"source": "jira", "result": str(result["messages"][-1].content)}]
     }
 
-# async def evaluator(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-#     file_path = os.path.join(base_dir, "souls", "evaluator", "SOUL.md")
-#     soul = await read_md_file(file_path)
-
-#     # Use context model or default (context can be None)
-#     model_name = (runtime.context or {}).get("evaluator", DEFAULT_MODEL)
-#     model = ModelAgent(model_name=model_name).load_model()
-
-#     agent = create_agent(
-#         model=model,
-#         system_prompt=soul
-#     )
-#     # Invoke with conversation context - agent will see full message history
-#     result = await agent.ainvoke({"messages": state["messages"]})
-
-#     # Return results with source tracking
-#     return {"check_progress": result["messages"][-1].content}
-
-# def progress_router(state: RouterState):
-#     if state["check_progress"] == "NEXT_STEP":
-#         return "NEXT"
-#     elif state["check_progress"] == "END":
-#         return "END"
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
+builder.add_node("classify_query", classify_query)
 builder.add_node("orchestrator", orchestrator_agent)
 builder.add_node("researcher", researcher_agent)
-builder.add_node("coding_planner", coding_planner_agent)
+# builder.add_node("coding_planner", coding_planner_agent)
 builder.add_node("coder", coder_agent)
-# builder.add_node("jira", jira_agent)
-# builder.add_node("evaluator", evaluator)
-# builder.add_node("classifier", classify_query)
-# builder.add_conditional_edges("classifier", route_to_agents, ["researcher", "coder"])
+builder.add_node("jira", jira_agent)
 
-
-# Start with orchestrator
-builder.add_edge(START, "orchestrator")
-# builder.add_edge("orchestrator", "evaluator")
-# builder.add_conditional_edges(
-#     "evaluator",
-#     progress_router,
-#     {
-#         "NEXT": "orchestrator",
-#         "END": END
-#     },
-# )
-
-# After specialist agents complete, go to END
-# builder.add_edge("researcher", END)
-# builder.add_edge("coder", END)
+# Classify first; orchestrator LLM only as low-confidence fallback
+builder.add_edge(START, "classify_query")
+builder.add_conditional_edges(
+    "classify_query",
+    route_by_agent,
+    ["coder", "researcher", "jira", "orchestrator"],
+)
+builder.add_edge("researcher", END)
+builder.add_edge("coder", END)
+builder.add_edge("jira", END)
 
 # LangGraph API provides persistence automatically
 # - langgraph dev: in-memory checkpointer
