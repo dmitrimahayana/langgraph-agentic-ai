@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Annotated
+from typing import Any, Dict, Annotated, Literal
 from langgraph.graph import StateGraph, MessagesState, START, END, add_messages
 from langchain.tools import tool, ToolRuntime
 from langgraph.runtime import Runtime
@@ -8,7 +8,6 @@ from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
 from src.tools.jira.Jira import jira_tools
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain.mcp import MCPAdapter
 from deepagents.backends import StateBackend, FilesystemBackend, LocalShellBackend
 from typesafe_sdk import Choice, Noul, Score, AsyncTypeSafeClient
 from langchain.agents.middleware import HumanInTheLoopMiddleware 
@@ -18,6 +17,7 @@ from langchain.messages import AnyMessage, HumanMessage, ToolMessage, AIMessage
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 import os
+import operator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,6 +43,13 @@ backend_fl = FilesystemBackend(root_dir=WORKDIR)
 #     # Pass an explicit, minimal PATH instead of inheriting your full env.
 #     env={"PATH": "/usr/bin:/bin"},
 # ) # DEV 2 very risky be carefull!! check if HITL is activated
+CONFIDENCE_THRESHOLD = 0.6
+Route = Literal["coder", "researcher", "jira", "orchestrator"]
+# Classifier label -> graph node
+AGENT_NODES: dict[str, Route] = {
+    "coder": "coder",
+    "jira": "jira",
+}
 
 # Lazy initialization for search tool - requires TAVILY_API_KEY env var
 _search_tool = None
@@ -71,15 +78,25 @@ class Context(TypedDict, total=False):
     researcher_model: str
     coder_model: str
 
+class Classification(TypedDict):
+    """A single routing decision: which agent to call with what query."""
+    source: Literal["coder", "jira"]
+    query: str
+    confidence: float
+
 class RouterState(MessagesState):
     """State that maintains conversation history via messages."""
+    classifications: Annotated[list[Classification], operator.add]  # Routing history across turns
     researcher_messages: Annotated[list[AnyMessage], add_messages]
     orchestrator_messages: Annotated[list[AnyMessage], add_messages]
+    router_messages: Annotated[list[AnyMessage], add_messages]
     coder_messages: Annotated[list[AnyMessage], add_messages]
     jira_messages: Annotated[list[AnyMessage], add_messages]
     task_list: list = []
     current_task: str = ""
     check_progress: str = ""
+    agent_confidence: float
+    agent_probability: dict[str, float]
 
 class PlanStep(BaseModel):
     task: str
@@ -135,13 +152,19 @@ def ask_jira_agent(question: str, runtime: ToolRuntime) -> Command:
 
 @tool
 async def handoff_to_orchestrator(task: str, runtime: ToolRuntime) -> Command:
-    """Delegate the task step to the orchestrator agent. 
+    """Delegate the 1 task step at a time to the orchestrator agent. 
     Provide a complete, self-contained description in the plan parameter, 
     as the agent does not have access to the previous conversation history.
     """
     result = Command(
         goto="router",
-        update={},
+        update={
+            "messages":[ToolMessage(
+                content=f"Handed off to orchestrator with task: {task}",
+                tool_call_id=runtime.tool_call_id
+            )],
+            "router_messages":[HumanMessage(task)]
+        },
         graph=Command.PARENT,
     )
     return result
@@ -172,7 +195,7 @@ async def research_think_agent(state: RouterState, runtime: Runtime[Context]) ->
     )
 
 async def classify_query(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
-    last_message = state["messages"][-1]
+    last_message = state["router_messages"][-1]
     typesafe_client = AsyncTypeSafeClient(api_key=TYPESAFE_AI_API_KEY)
     response = await typesafe_client.system_one(
         state=last_message.content,
@@ -181,44 +204,55 @@ async def classify_query(state: RouterState, runtime: Runtime[Context]) -> Dict[
                 instructions="Which team should handle this",
                 criteria={
                     "coder": "write, edit, debug or save code and files",
-                    "researcher": "explain, look up, compare or research a topic on the internet",
-                    "admin": "Jira tickets, issues, FAQ, project administration",
+                    "jira": "Jira tickets, issues, FAQ, project administration",
                 },
             ),
         },
     )
     agent_choice = response.answers["agent_name"]
-    return {
-        "classifications": [{
-            "source": AGENT_NODES.get(agent_choice.choice, agent_choice.choice),
-            "query": last_message.content,
-            "confidence": agent_choice.confidence,
-        }],
-        "agent_name": agent_choice.choice,
-        "agent_confidence": agent_choice.confidence,
-        "agent_probability": agent_choice.probabilities,
-    }
+    if agent_choice.choice == "coder":
+        return Command(
+            goto="coder",
+            update={
+            "coder_messages": [HumanMessage(last_message.content)],
+            "agent_name": agent_choice.choice,
+            "agent_confidence": agent_choice.confidence,
+            "agent_probability": agent_choice.probabilities,
+        }
+    )
+    else:
+        return Command(
+            goto="jira",
+            update={
+            "jira_messages": [HumanMessage(last_message.content)],
+            "agent_name": agent_choice.choice,
+            "agent_confidence": agent_choice.confidence,
+            "agent_probability": agent_choice.probabilities,
+        }
+        )
 
 async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str, Any]:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_dir, "souls", "coder", "SOUL.md")
-    soul = await read_md_file(file_path) + f"\n ###### The Current Folder Location is :{WORKDIR}"
-
+    soul = await read_md_file(file_path) 
+    soul = soul + f"\n ###### You Have full Access to The Current Folder Location is :{WORKDIR}"
+    soul = soul + f"\n ###### you can access all in current folder location with availble tool"
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("coder_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
 
     agent = create_deep_agent(
-        model=model,
+        model=model, 
+        tools=[get_search_tool()],
         system_prompt=soul,
         backend=backend_fl,
     )
     # Invoke with conversation context - agent will see full message history
     result = await agent.ainvoke({"messages": state.get("coder_messages",[])})
     return Command(
-        goto="orchestrator",
+        goto="research_think_agent",
         update={
-        "orchestrator_messages": result["messages"][-1],
+        "messages": result["messages"][-1],
         "coder_messages": result["messages"],
         "current_task": None
         }
@@ -242,7 +276,7 @@ async def think_coder_agent(state: RouterState, runtime: Runtime[Context]) -> Di
     result = await agent.ainvoke({"messages": state.get("coder_messages",[])})
     # Return results with source tracking
     return Command(
-        goto="planner",
+        goto="research_think_agent",
         update={
         "messages": result["messages"][-1],
         "coder_messages": result["messages"]
@@ -263,15 +297,11 @@ async def jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str,
     )
     # Invoke with conversation context - agent will see full message history
     result = await agent.ainvoke({"messages": state.get("jira_messages",[])})
-    # result["messages"] = [
-    #     m for m in result["messages"] if not isinstance(m, HumanMessage)
-    # ]
     return Command(
-        goto="orchestrator",
+        goto="research_think_agent",
         update={
-        "orchestrator_messages": result["messages"][-1],
-        "jira_messages": result["messages"],
-        "current_task": None
+        "messages": result["messages"][-1],
+        "jira_messages": result["messages"]
         }
     )
 
@@ -290,7 +320,7 @@ async def think_jira_agent(state: RouterState, runtime: Runtime[Context]) -> Dic
     # Invoke with conversation context - agent will see full message history
     result = await agent.ainvoke({"messages": state.get("jira_messages",[])})
     return Command(
-        goto="planner",
+        goto="research_think_agent",
         update={
         "jira_messages": result["messages"],
         "messages": result["messages"][-1]
@@ -302,6 +332,7 @@ def bridge(state: RouterState):
 
 # Define the graph
 builder = StateGraph(RouterState, context_schema=Context)
+builder.add_node("router", classify_query)
 builder.add_node("research_think_agent", research_think_agent)
 builder.add_node("bridge", bridge)
 builder.add_node("coder", coder_agent)
@@ -311,7 +342,7 @@ builder.add_node("think_jira", think_jira_agent)
 
 
 # Start with orchestrator
-builder.add_edge(START, "planner")
+builder.add_edge(START, "research_think_agent")
 builder.add_edge("bridge", END)
 # builder.add_conditional_edges(
 #     START,
