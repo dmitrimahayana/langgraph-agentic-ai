@@ -208,6 +208,7 @@ async def classify_query(state: RouterState, runtime: Runtime[Context]) -> Dict[
         },
     )
     agent_choice = response.answers["agent_name"]
+    print(f"typesafe classification: {agent_choice.choice} (confidence: {agent_choice.confidence}) probabilities: {agent_choice.probabilities}")
     return {
         "classifications": [{
             "source": AGENT_NODES.get(agent_choice.choice, agent_choice.choice),
