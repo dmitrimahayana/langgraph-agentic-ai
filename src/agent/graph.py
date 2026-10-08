@@ -112,6 +112,45 @@ def get_jira_tools():
     return _jira_tools
 
 
+@tool
+def get_jira_ticket(issue_key: str) -> str:
+    """Read a Jira ticket's summary, description, status and assignee.
+
+    Args:
+        issue_key: Jira issue key, e.g. "PP-3"
+    """
+    try:
+        jira = JiraAPIWrapper().jira
+        fields = jira.issue(issue_key, fields="summary,description,status,assignee")["fields"]
+        assignee = (fields.get("assignee") or {}).get("displayName", "Unassigned")
+        return (
+            f"Ticket: {issue_key}\n"
+            f"Summary: {fields.get('summary')}\n"
+            f"Status: {fields['status']['name']}\n"
+            f"Assignee: {assignee}\n"
+            f"Description:\n{fields.get('description') or '(empty)'}"
+        )
+    except Exception as e:
+        return f"Error reading {issue_key}: {type(e).__name__}: {e}"
+
+
+@tool
+def start_jira_ticket(issue_key: str) -> str:
+    """Assign a Jira ticket to the current user (the API account) and move it to In Progress.
+
+    Args:
+        issue_key: Jira issue key, e.g. "PP-3"
+    """
+    try:
+        jira = JiraAPIWrapper().jira
+        me = jira.myself()
+        jira.assign_issue(issue_key, account_id=me["accountId"])
+        jira.set_issue_status(issue_key, "In Progress")
+        return f"{issue_key} assigned to {me['displayName']} and moved to In Progress."
+    except Exception as e:
+        return f"Error starting {issue_key}: {type(e).__name__}: {e}"
+
+
 class Context(TypedDict, total=False):
     """Context parameters for the agent.
 
@@ -344,7 +383,7 @@ async def coder_agent(state: RouterState, runtime: Runtime[Context]) -> Dict[str
 
     agent = create_deep_agent(
         model=model,
-        tools=[save_script_file],
+        tools=[save_script_file, get_jira_ticket, start_jira_ticket],
         system_prompt=soul,
         backend=backend,
     )
