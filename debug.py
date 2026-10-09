@@ -4,11 +4,12 @@ from dotenv import load_dotenv
 from src.agent.graph import graph, builder
 from langgraph.types import Command
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
 
 
 load_dotenv()
 checkpointer = InMemorySaver()
-graph = builder.compile(checkpointer=checkpointer)
+graph = builder.compile(checkpointer=checkpointer, store=InMemoryStore())
 
 config = {"configurable": {"thread_id": "test-multi-round-conversation"}}
 

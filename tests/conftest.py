@@ -1,5 +1,6 @@
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.store.memory import InMemoryStore
 
 from agent.graph import builder
 
@@ -11,11 +12,16 @@ def anyio_backend():
 
 
 @pytest.fixture
-def graph():
-    """
-    Compile graph with in-memory checkpointer for testing.
+def store():
+    """Fresh in-memory store for the agent/skill registry."""
+    return InMemoryStore()
 
-    This fixture provides a fresh graph instance with memory-based
-    checkpointing for each test, ensuring test isolation.
+
+@pytest.fixture
+def graph(store):
     """
-    return builder.compile(checkpointer=MemorySaver())
+    Compile graph with in-memory checkpointer and store for testing.
+
+    This fixture provides a fresh graph instance for each test, ensuring test isolation.
+    """
+    return builder.compile(checkpointer=MemorySaver(), store=store)

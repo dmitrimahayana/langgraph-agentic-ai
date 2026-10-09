@@ -1,6 +1,8 @@
 {
   "$schema": "https://langgra.ph/schema.json",
-  "dependencies": ["."],
+  "dependencies": [
+    "."
+  ],
   "graphs": {
     "agent": "./src/agent/graph.py:graph"
   },
@@ -11,9 +13,7 @@
       "graph_id": "agent",
       "config": {
         "configurable": {
-          "orchestrator_model": "ollama:gemma4:31b-cloud",
-          "researcher_model": "ollama:gemma4:31b-cloud",
-          "coder_model": "ollama:gemma4:31b-cloud"
+          "default_model": "ollama:gemma4:31b-cloud"
         }
       }
     }

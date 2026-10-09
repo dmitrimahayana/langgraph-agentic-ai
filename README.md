@@ -13,6 +13,26 @@ The core logic defined in `src/agent/graph.py`, showcases an single-step applica
 
 You can extend this graph to orchestrate more complex agentic workflows that can be visualized and debugged in LangGraph Studio.
 
+## Agent harness
+
+Every chat message goes to one **default-agent** ([graph.py](./src/agent/graph.py)). Through chat it can:
+
+- create / update / delete agents: name, description, system prompt, model, tools, skills
+- create / update skills (`SKILL.md`, Agent Skills format)
+- delegate work to created agents via the deepagents `task` tool
+
+Agents and skills are stored in the LangGraph Store ([registry.py](./src/agent/registry.py)): in-memory under `langgraph dev`, Postgres in production. On first run the store is seeded with `coder`, `researcher`, `admin` and the bundled skills in [src/agent/skills/](./src/agent/skills/).
+
+Only tools listed in [tools/catalog.py](./src/agent/tools/catalog.py) can be assigned. To add a tool, add a `ToolEntry` there. An agent created or changed in chat can be used from the next message.
+
+Example:
+
+```
+> create a skill "release-notes" that turns Jira tickets into a changelog
+> create an agent "pm" with the jira tool and the release-notes skill
+> ask pm to write release notes for PP-1..PP-5
+```
+
 ## Getting Started
 
 1. Install dependencies, along with the [LangGraph CLI](https://langchain-ai.github.io/langgraph/concepts/langgraph_cli/), which will be used to run the server.
