@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from langchain.tools import tool
@@ -18,8 +19,13 @@ from langchain_core.tools import BaseTool, StructuredTool
 
 logger = logging.getLogger(__name__)
 
-# Coder output lives outside the repo so `langgraph dev` hot reload is not triggered
-SCRIPT_DIR = os.path.expanduser(os.environ.get("CODER_WORKSPACE_DIR", "~/agent-workspace"))
+# Coding workspace: repositories + coder output only (agent config lives in src/agent/profile/).
+# Outside the repo so `langgraph dev` hot reload is not triggered; mount as a volume in prod.
+WORKSPACE_DIR = Path(
+    os.environ.get("WORKSPACE_DIR") or os.environ.get("CODER_WORKSPACE_DIR") or "~/agent-workspace"
+).expanduser().resolve()
+# Catalog name that grants an agent access to /workspace/ through the built-in file tools
+WORKSPACE_TOOL = "workspace"
 
 
 # ---------- Web search ----------
@@ -129,50 +135,65 @@ def start_jira_ticket(issue_key: str) -> str:
         return f"Error starting {issue_key}: {type(e).__name__}: {e}"
 
 
-# ---------- Coder workspace ----------
-def resolve_script_path(file_path: str) -> str | None:
-    """Resolve file_path inside SCRIPT_DIR, or None if it points outside it.
-
-    Accepts absolute paths, ~-prefixed paths, or paths relative to SCRIPT_DIR.
-    """
-    path = os.path.expanduser(file_path.replace("\\", "/"))
-    if not os.path.isabs(path):
-        path = os.path.join(SCRIPT_DIR, path.lstrip("/"))
-    real_path = os.path.realpath(path)
-    real_root = os.path.realpath(SCRIPT_DIR)
-    if os.path.commonpath([real_path, real_root]) != real_root:
-        return None
-    return real_path
+def find_jira_user(jira, query: str) -> dict:
+    """Find one Jira user by display name or email; raise if none or ambiguous."""
+    users = [u for u in jira.user_find_by_user_string(query=query) if u.get("accountType") == "atlassian"]
+    exact = [
+        u for u in users
+        if query.lower() in {str(u.get("displayName", "")).lower(), str(u.get("emailAddress", "")).lower()}
+    ]
+    matches = exact or users
+    if len(matches) != 1:
+        names = [u.get("displayName") for u in users] or "none"
+        raise ValueError(f"Expected exactly one Jira user for {query!r}, found: {names}")
+    return matches[0]
 
 
 @tool
-def save_script_file(file_path: str, content: str) -> str:
-    """Write content to a file inside the coder workspace (~/agent-workspace).
+def submit_jira_ticket_for_review(issue_key: str, comment: str, reviewer: str = "", status: str = "In Review") -> str:
+    """Hand a finished ticket to a reviewer: move it to review, add a comment mentioning the reviewer, assign it to them.
 
     Args:
-        file_path: Path of the file, relative to the coder workspace
-        content: The content to write to the file
-
-    Returns:
-        Success message with file path, or an error if the path is outside the coder workspace
+        issue_key: Jira issue key, e.g. "PP-3"
+        comment: What was done: summary of the change, files under /workspace/, how to test
+        reviewer: Jira display name or email of the reviewer; defaults to JIRA_REVIEWER env var
+        status: Target review status, e.g. "In Review"
     """
-    resolved = resolve_script_path(file_path)
-    if resolved is None:
-        return f"Error: {file_path} is outside {SCRIPT_DIR}. The coder may only write files inside {SCRIPT_DIR}."
-    file_path = resolved
+    reviewer = reviewer or os.environ.get("JIRA_REVIEWER", "")
+    if not reviewer:
+        return "Error: no reviewer given and JIRA_REVIEWER is not set."
+    done = []
     try:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        return f"Successfully wrote to {file_path}"
+        from langchain_community.utilities.jira import JiraAPIWrapper
+
+        jira = JiraAPIWrapper().jira
+        user = find_jira_user(jira, reviewer)
+
+        transitions = jira.get_issue_transitions(issue_key)
+        target = next((t["to"] for t in transitions if t["to"].lower() == status.lower()), None) or next(
+            (t["to"] for t in transitions if "review" in t["to"].lower()), None
+        )
+        if target is None:
+            return f"Error: no review transition for {issue_key}. Available: {[t['to'] for t in transitions]}"
+        jira.set_issue_status(issue_key, target)
+        done.append(f"moved to {target}")
+
+        # REST v2 wiki markup mention; renders as @displayName in Jira Cloud
+        jira.issue_add_comment(issue_key, f"[~accountid:{user['accountId']}] {comment}")
+        done.append(f"commented mentioning {user['displayName']}")
+
+        jira.assign_issue(issue_key, account_id=user["accountId"])
+        done.append(f"assigned to {user['displayName']}")
+        return f"{issue_key}: " + ", ".join(done) + "."
     except Exception as e:
-        return f"Error writing to {file_path}: {str(e)}"
+        partial = f" Completed before the error: {', '.join(done)}." if done else ""
+        return f"Error submitting {issue_key} for review: {type(e).__name__}: {e}.{partial}"
 
 
 # ---------- Slack ----------
 def get_slack_tools():
     """Slack tools - Slack.py validates SLACK_BOT_TOKEN / SLACK_CHANNEL_ID at import."""
-    from agent.tools.slack.Slack import get_slack_tools as _get
+    from agent.core.slack import get_slack_tools as _get
 
     return _get()
 
@@ -203,9 +224,14 @@ TOOL_CATALOG: dict[str, ToolEntry] = {
         "Assign a Jira ticket to the bot account and move it to In Progress.",
         lambda: [start_jira_ticket],
     ),
-    "save_script_file": ToolEntry(
-        f"Write files inside the coder workspace ({SCRIPT_DIR}).",
-        lambda: [save_script_file],
+    "jira_submit_review": ToolEntry(
+        "Hand a finished Jira ticket to a reviewer: move to In Review, comment mentioning the reviewer, assign to them.",
+        lambda: [submit_jira_ticket_for_review],
+    ),
+    WORKSPACE_TOOL: ToolEntry(
+        "Coding workspace at /workspace/ (repositories + code output): ls, read_file, write_file, edit_file, glob, grep. Only for agents that write code.",
+        # No extra tool: deepagents' built-in file tools do the work; registry.permissions_for grants the path
+        lambda: [],
     ),
     "slack": ToolEntry(
         "Send, read and reply to messages in the team Slack channel (needs SLACK_BOT_TOKEN, SLACK_CHANNEL_ID).",

@@ -12,9 +12,7 @@
     "default": {
       "graph_id": "agent",
       "config": {
-        "configurable": {
-          "default_model": "ollama:gemma4:31b-cloud"
-        }
+        "configurable": {}
       }
     }
   }

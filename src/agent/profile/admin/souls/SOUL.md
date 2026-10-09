@@ -1,3 +1,9 @@
+---
+name: admin
+description: 'Manages Jira: create, update, transition, assign and query issues.'
+model: ollama:gemma4:31b-cloud
+---
+
 # Profile: Admin Agent
 
 ## Objective

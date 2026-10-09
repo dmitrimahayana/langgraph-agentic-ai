@@ -1,3 +1,9 @@
+---
+name: slack
+description: Sends, reads and replies to messages in the team Slack channel.
+model: ollama:gemma4:31b-cloud
+---
+
 # Profile: Slack Agent
 
 ## Objective

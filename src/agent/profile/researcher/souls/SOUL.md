@@ -1,3 +1,9 @@
+---
+name: researcher
+description: Researches, explains and compares topics on the internet with cited sources.
+model: ollama:gemma4:31b-cloud
+---
+
 # Researcher
 
 **Role:** Researcher

@@ -28,9 +28,12 @@ class ModelAgent:
                     base_url = "http://localhost:11434"
                     # print("Detected local environment, using localhost")
 
+            # httpx has no timeout by default: a stalled Ollama (cloud) request would hang the run forever
+            timeout = float(os.getenv("OLLAMA_TIMEOUT", "180"))
             return ChatOllama(
                 model=new_model_name,
-                base_url=base_url
+                base_url=base_url,
+                client_kwargs={"timeout": timeout},
             )
         else:
             raise ValueError("Unsupported model name")

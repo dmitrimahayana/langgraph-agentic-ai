@@ -15,21 +15,33 @@ You can extend this graph to orchestrate more complex agentic workflows that can
 
 ## Agent harness
 
-Every chat message goes to one **default-agent** ([graph.py](./src/agent/graph.py)). Through chat it can:
+Every chat message goes to the **default** agent. Through chat it can create, change and delete agents, give them tools and skills, and delegate work to them (deepagents `task` tool).
 
-- create / update / delete agents: name, description, system prompt, model, tools, skills
-- create / update skills (`SKILL.md`, Agent Skills format)
-- delegate work to created agents via the deepagents `task` tool
+Every agent is a folder:
 
-Agents and skills are stored in the LangGraph Store ([registry.py](./src/agent/registry.py)): in-memory under `langgraph dev`, Postgres in production. On first run the store is seeded with `coder`, `researcher`, `admin` and the bundled skills in [src/agent/skills/](./src/agent/skills/).
+```
+src/agent/
+  graph.py  registry.py  model.py        ← code
+  core/                                  ← shared code: tool catalog, management tools
+  profile/                               ← one folder per agent
+    default/                             ← chat entry point
+    coder/  researcher/  admin/  slack/
+      souls/SOUL.md                      ← frontmatter (name, description, model) + system prompt
+      tools/TOOLS.md                     ← "- tool_name" lines from core/catalog.py
+      skills/<skill>/SKILL.md            ← Agent Skills format
+```
 
-Only tools listed in [tools/catalog.py](./src/agent/tools/catalog.py) can be assigned. To add a tool, add a `ToolEntry` there. An agent created or changed in chat can be used from the next message.
+- The graph re-reads all folders on every message, so agents created in chat **or edited by hand** are used from the next message.
+- Only tools in [core/catalog.py](./src/agent/core/catalog.py) can be assigned. To add a tool, add a `ToolEntry` there.
+- Agents can only write inside their own `skills/` folder, never their `SOUL.md`, `TOOLS.md` or code.
+- **Workspace** (`WORKSPACE_DIR`, default `~/agent-workspace`) holds only repositories and code output, never agent config. Agents with `- workspace` in `TOOLS.md` (the coder) see it at `/workspace/` through the built-in `ls`/`read_file`/`write_file`/`edit_file`/`glob`/`grep` tools; other agents get permission denied. Mount it as a volume in prod.
+- `src/agent/profile/` is the only agents directory. In prod, mount it as a persistent volume (or commit agents created in dev to git) so chat-created agents survive redeploys.
 
 Example:
 
 ```
-> create a skill "release-notes" that turns Jira tickets into a changelog
-> create an agent "pm" with the jira tool and the release-notes skill
+> create an agent "pm" with the jira tool
+> give pm a skill "release-notes" that turns Jira tickets into a changelog
 > ask pm to write release notes for PP-1..PP-5
 ```
 
