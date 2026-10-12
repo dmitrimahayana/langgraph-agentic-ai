@@ -20,8 +20,8 @@ async def deepagents(state: RouterState, runtime: Runtime[Context]):
     model = ModelAgent(model_name=model_name).load_model()
     thinking = create_deep_agent(
         model=model,
-        tools=[],
-        system_prompt=,
+        backend=[],
+        skills="src/agent/core/deepagents/skills/"
     )
     thinking_result = await thinking.ainvoke({"messages": state["messages"]})
 
