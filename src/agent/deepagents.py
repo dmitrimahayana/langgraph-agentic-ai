@@ -1,4 +1,4 @@
-import os
+import os, re
 from langgraph.graph import StateGraph, MessagesState, START, END
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
 from deepagents import create_deep_agent
@@ -8,10 +8,30 @@ from agent.model import ModelAgent
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKDIR = os.path.abspath("./workspace_agent")
-MEMORIES = os.path.abspath("./memories")
-os.makedirs(WORKDIR, exist_ok=True)
-os.makedirs(MEMORIES, exist_ok=True)
+PROFILE_DIR = BASE_DIR / "profile"
+WORK_DIR = os.path.abspath("./workspace_agent")
+MEMORIES_DIR = os.path.abspath("./memories")
+os.makedirs(WORK_DIR, exist_ok=True)
+os.makedirs(MEMORIES_DIR, exist_ok=True)
+os.makedirs(PROFILE_DIR, exist_ok=True)
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+def agents_dir():
+    """Root folder holding agent folders."""
+    return PROFILE_DIR
+    
+def list_agents() -> list:
+    root = agents_dir()
+    specs = []
+    for path in sorted(root.iterdir()) if root.is_dir() else []:
+        if path.is_dir() and NAME_RE.match(path.name) and is_agent_dir(path):
+            try:
+                specs.append(load_agent(path))
+            except Exception as e:
+                print("Skipping agent folder %s: %s", path, e)
+    return specs
+
 
 class Context(TypedDict, total=False):
     orchestrator_model: str
@@ -32,7 +52,7 @@ async def deepagents(state: RouterState, runtime: Runtime[Context]):
         backend=CompositeBackend(
             default=StateBackend(),
             routes={
-                WORKDIR: FilesystemBackend(root_dir=WORKDIR),
+                WORK_DIR: FilesystemBackend(root_dir=WORK_DIR),
         })
     )
     thinking_result = await thinking.ainvoke({"messages": state["messages"]})
