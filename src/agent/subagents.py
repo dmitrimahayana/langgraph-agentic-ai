@@ -3,9 +3,9 @@ from pathlib import Path
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools.base import BaseTool
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = BASE_DIR / "src" / "core"
 
 
@@ -49,11 +49,13 @@ def split_frontmatter(text: str) -> tuple[dict[str], str]:
 
 def list_agents() -> list:
     root = Path(PROFILE_DIR)
-    specs = []
+    subagents = []
     for path in sorted(root.iterdir()) if root.is_dir() else []:
         if path.is_dir() and NAME_RE.match(path.name) and is_agent_dir(path):
             try:
-                specs.append(load_agent(path))
+                subagents.append(load_agent(path))
             except Exception as e:
                 print("Skipping agent folder %s: %s", path, e)
-    return specs
+    return subagents
+
+def
