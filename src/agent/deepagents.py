@@ -15,24 +15,6 @@ os.makedirs(WORK_DIR, exist_ok=True)
 os.makedirs(MEMORIES_DIR, exist_ok=True)
 os.makedirs(PROFILE_DIR, exist_ok=True)
 
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-
-def agents_dir():
-    """Root folder holding agent folders."""
-    return PROFILE_DIR
-    
-def list_agents() -> list:
-    root = agents_dir()
-    specs = []
-    for path in sorted(root.iterdir()) if root.is_dir() else []:
-        if path.is_dir() and NAME_RE.match(path.name) and is_agent_dir(path):
-            try:
-                specs.append(load_agent(path))
-            except Exception as e:
-                print("Skipping agent folder %s: %s", path, e)
-    return specs
-
-
 class Context(TypedDict, total=False):
     orchestrator_model: str
     researcher_model: str
@@ -53,7 +35,8 @@ async def deepagents(state: RouterState, runtime: Runtime[Context]):
             default=StateBackend(),
             routes={
                 WORK_DIR: FilesystemBackend(root_dir=WORK_DIR),
-        })
+        }),
+        subagents=[]
     )
     thinking_result = await thinking.ainvoke({"messages": state["messages"]})
     return {"messages": thinking_result["messages"]}
