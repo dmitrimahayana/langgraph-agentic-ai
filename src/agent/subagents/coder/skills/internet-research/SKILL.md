@@ -1,4 +1,4 @@
 ---
 name: internet-research
-description: Team conventions for reading, starting, moving and assigning Jira tickets, including the review process.
+description: searching reference from the internet using tavily_search_results_json
 ---
