@@ -1,18 +1,23 @@
 import os, re
+from pathlib import Path
 from langgraph.graph import StateGraph, MessagesState, START, END
+from langgraph.checkpoint.memory import InMemorySaver
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
 from deepagents import create_deep_agent
 from typing_extensions import TypedDict
 from langgraph.runtime import Runtime
 from agent.model import ModelAgent
+from agent.subagents import list_agents
+from agent.catalog import catalog
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROFILE_DIR = BASE_DIR / "profile"
-WORK_DIR = os.path.abspath("./workspace_agent")
-MEMORIES_DIR = os.path.abspath("./memories")
+SUBAGENT_MODEL = "ollama:gemma4:31b-cloud" 
+BASE_DIR = Path(__file__).parent
+PROJECT_ROOT = BASE_DIR.parent.parent
+PROFILE_DIR = PROJECT_ROOT / "profile"
+WORK_DIR = str(PROJECT_ROOT / "workspace")
+
 os.makedirs(WORK_DIR, exist_ok=True)
-os.makedirs(MEMORIES_DIR, exist_ok=True)
 os.makedirs(PROFILE_DIR, exist_ok=True)
 
 class Context(TypedDict, total=False):
@@ -27,16 +32,28 @@ async def deepagents(state: RouterState, runtime: Runtime[Context]):
     # Use context model or default (context can be None)
     model_name = (runtime.context or {}).get("deepagents_model", DEFAULT_MODEL)
     model = ModelAgent(model_name=model_name).load_model()
+    
+    # Initialize a separate model for subagents
+    subagent_model_name = (runtime.context or {}).get("subagent_model", SUBAGENT_MODEL)
+    subagent_model = ModelAgent(model_name=subagent_model_name).load_model()
+    
+    # Pass the subagent-specific model to the loader
+    subagents_list = list_agents(model=subagent_model)
+    
+    # Resolve Tavily tools from catalog
+    tavily_tools = catalog.resolve(["tavily_search_results_json"])
+    
     thinking = create_deep_agent(
         model=model,
-        backend=[],
-        skills="src/agent/core/deepagents/skills/",
+        skills="src/agent/mainagent/skills/",
         backend=CompositeBackend(
             default=StateBackend(),
             routes={
-                WORK_DIR: FilesystemBackend(root_dir=WORK_DIR),
-        }),
-        subagents=[]
+                "/workspace/": FilesystemBackend(root_dir=WORK_DIR, virtual_mode=True),
+                "/skills/": FilesystemBackend(root_dir="src/agent/mainagent/skills/", virtual_mode=True),
+            }),
+        subagents=subagents_list,
+        tools=tavily_tools
     )
     thinking_result = await thinking.ainvoke({"messages": state["messages"]})
     return {"messages": thinking_result["messages"]}

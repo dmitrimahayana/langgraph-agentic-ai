@@ -1,14 +1,16 @@
 import os, re, yaml
+from typing import List, Optional
 from pathlib import Path
 from langchain_core.language_models.chat_models import BaseChatModel
-# from src.agent.catalog import catalog
+from agent.catalog import catalog
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
 
 BASE_DIR = Path(__file__).parent
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
 SUBAGENTS_DIR = BASE_DIR / "subagents"
-WORKSPACE_DIR = BASE_DIR.parent / "workspace"
+PROJECT_ROOT = BASE_DIR.parent.parent
+WORKSPACE_DIR = PROJECT_ROOT / "workspace"
 
 
 def is_agent_dir(path: Path) -> bool:
@@ -91,7 +93,7 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
         meta = {}
     return meta, text[match.end():].lstrip("\n")
 
-def list_agents() -> list:
+def list_agents(model: Optional[BaseChatModel] = None) -> list:
     root = SUBAGENTS_DIR
     subagents = []
     if not root.is_dir():
@@ -100,7 +102,7 @@ def list_agents() -> list:
     for path in sorted(root.iterdir()):
         if path.is_dir() and NAME_RE.match(path.name) and is_agent_dir(path):
             try:
-                subagents.append(load_agent(path, model=None))
+                subagents.append(load_agent(path, model=model))
             except Exception as e:
                 print(f"Skipping agent folder {path}: {e}")
     return subagents
