@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from langgraph.types import Command
 from langgraph.checkpoint.memory import InMemorySaver
 
+load_dotenv()
+
 # --- Test Configuration ---
 # Choose which graph to test: "original" or "mainagent"
 TEST_TARGET = "mainagent" 
@@ -16,8 +18,6 @@ else:
     from src.agent.graph import builder as agent_builder
     checkpointer = InMemorySaver()
     agent_graph = agent_builder.compile(checkpointer=checkpointer)
-
-load_dotenv()
 
 config = {"configurable": {"thread_id": "test-multi-round-conversation"}}
 result = {}

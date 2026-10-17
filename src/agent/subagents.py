@@ -2,7 +2,7 @@ import os, re, yaml
 from typing import List, Optional
 from pathlib import Path
 from langchain_core.language_models.chat_models import BaseChatModel
-from agent.catalog import catalog
+from src.agent.catalog import catalog
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
 
 BASE_DIR = Path(__file__).parent
@@ -69,10 +69,10 @@ def load_agent(path: Path, model: BaseChatModel) -> dict:
     # Routes: /skills/ -> agent skills folder, /workspace/ -> global workspace
     routes = {}
     if skills_dir.is_dir():
-        routes["/skills/"] = FilesystemBackend(root_dir=str(skills_dir), virtual_mode=True)
+        routes["/skills/"] = FilesystemBackend(root_dir=str(skills_dir))
     
     if WORKSPACE_DIR.is_dir():
-        routes["/workspace/"] = FilesystemBackend(root_dir=str(WORKSPACE_DIR), virtual_mode=True)
+        routes["/workspace/"] = FilesystemBackend(root_dir=str(WORKSPACE_DIR))
 
     agent_dict["backend"] = CompositeBackend(
         default=StateBackend(),

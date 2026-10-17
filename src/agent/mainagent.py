@@ -1,14 +1,13 @@
 import os, re
 from pathlib import Path
 from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph.checkpoint.memory import InMemorySaver
 from deepagents.backends import CompositeBackend, StateBackend, FilesystemBackend
 from deepagents import create_deep_agent
 from typing_extensions import TypedDict
 from langgraph.runtime import Runtime
-from agent.model import ModelAgent
-from agent.subagents import list_agents
-from agent.catalog import catalog
+from src.agent.model import ModelAgent
+from src.agent.subagents import list_agents
+from src.agent.catalog import catalog
 
 DEFAULT_MODEL = "ollama:gemma4:31b-cloud"
 SUBAGENT_MODEL = "ollama:gemma4:31b-cloud" 
@@ -49,8 +48,8 @@ async def deepagents(state: RouterState, runtime: Runtime[Context]):
         backend=CompositeBackend(
             default=StateBackend(),
             routes={
-                "/workspace/": FilesystemBackend(root_dir=WORK_DIR, virtual_mode=True),
-                "/skills/": FilesystemBackend(root_dir="src/agent/mainagent/skills/", virtual_mode=True),
+                "/workspace/": FilesystemBackend(root_dir=WORK_DIR),
+                "/skills/": FilesystemBackend(root_dir="src/agent/mainagent/skills/"),
             }),
         subagents=subagents_list,
         tools=tavily_tools
