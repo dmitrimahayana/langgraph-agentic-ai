@@ -70,6 +70,7 @@ def load_agent(path: Path, model: BaseChatModel) -> dict:
     routes = {}
     if skills_dir.is_dir():
         routes["/skills/"] = FilesystemBackend(root_dir=str(skills_dir))
+        routes["memories/skills/"] = FilesystemBackend(root_dir=str(skills_dir))
     
     if WORKSPACE_DIR.is_dir():
         routes["/workspace/"] = FilesystemBackend(root_dir=str(WORKSPACE_DIR))

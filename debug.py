@@ -14,10 +14,10 @@ if TEST_TARGET == "mainagent":
     from src.agent.mainagent import builder as agent_builder
     checkpointer = InMemorySaver()
     agent_graph = agent_builder.compile(checkpointer=checkpointer)
-else:
-    from src.agent.graph import builder as agent_builder
-    checkpointer = InMemorySaver()
-    agent_graph = agent_builder.compile(checkpointer=checkpointer)
+# else:
+#     from src.agent.graph import builder as agent_builder
+#     checkpointer = InMemorySaver()
+#     agent_graph = agent_builder.compile(checkpointer=checkpointer)
 
 config = {"configurable": {"thread_id": "test-multi-round-conversation"}}
 result = {}

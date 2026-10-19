@@ -1,3 +1,8 @@
+---
+name: coder-delegation
+description: Workflow for handling Coding Task.
+---
+
 # Coder Delegation Skill
 
 This skill defines the workflow for delegating technical implementation, bug fixing, and code refactoring tasks to the `coder` subagent.
